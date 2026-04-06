@@ -11,6 +11,7 @@ import { useStudentStore } from './stores/useStudentStore';
 import { useGroupStore } from './stores/useGroupStore';
 import { useSettingsStore } from './stores/useSettingsStore';
 import { useWindowMode } from './hooks/useWindowMode';
+import { useAutoUpdate } from './hooks/useAutoUpdate';
 import type { WindowMode } from './hooks/useWindowMode';
 import './App.css';
 
@@ -182,6 +183,7 @@ function App() {
   const fetchGroups = useGroupStore((s) => s.fetchGroups);
   const fetchSettings = useSettingsStore((s) => s.fetchSettings);
   const { currentMode, cycleMode } = useWindowMode();
+  const update = useAutoUpdate();
 
   useEffect(() => {
     async function init() {
@@ -242,6 +244,19 @@ function App() {
   return (
     <div style={appFrameStyle}>
       {showOnboarding && <Onboarding onComplete={handleOnboardingComplete} />}
+
+      {/* Update notification */}
+      {update.available && update.info && (
+        <UpdateBanner
+          version={update.info.version}
+          body={update.info.body}
+          downloading={update.downloading}
+          progress={update.progress}
+          onUpdate={update.downloadAndInstall}
+          onDismiss={update.dismiss}
+        />
+      )}
+
       <div style={appWindowStyle}>
         <TabNavigation activeTab={activeTab} onTabChange={handleTabChange} />
         <div style={isAreaDetail ? appBodyColumnStyle : appBodyStyle}>
@@ -258,6 +273,175 @@ function App() {
             />
           )}
           {activeTab === 3 && <SettingsView />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Update Banner Component ──
+
+function UpdateBanner({
+  version,
+  body,
+  downloading,
+  progress,
+  onUpdate,
+  onDismiss,
+}: {
+  version: string;
+  body: string;
+  downloading: boolean;
+  progress: number;
+  onUpdate: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9999,
+        fontFamily: "'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+      }}
+      onClick={downloading ? undefined : onDismiss}
+    >
+      <div
+        style={{
+          backgroundColor: '#F4F4F2',
+          border: '1px solid #000000',
+          borderRadius: '16px',
+          padding: '32px',
+          width: '420px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '20px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '10px',
+              backgroundColor: '#D8E6F3',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '20px',
+              flexShrink: 0,
+            }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111111" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontSize: '18px', fontWeight: 700, color: '#111111', letterSpacing: '-0.02em' }}>
+              새 버전이 있습니다
+            </div>
+            <div style={{ fontSize: '13px', color: '#555555', marginTop: '2px' }}>
+              v{version}
+            </div>
+          </div>
+        </div>
+
+        {/* Release notes */}
+        {body && (
+          <div
+            style={{
+              fontSize: '14px',
+              lineHeight: 1.6,
+              color: '#333333',
+              backgroundColor: '#EAEAE6',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              maxHeight: '120px',
+              overflowY: 'auto',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {body}
+          </div>
+        )}
+
+        {/* Progress bar */}
+        {downloading && (
+          <div>
+            <div
+              style={{
+                height: '6px',
+                backgroundColor: '#E0E0E0',
+                borderRadius: '3px',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${progress}%`,
+                  backgroundColor: '#111111',
+                  borderRadius: '3px',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+            <div style={{ fontSize: '12px', color: '#555555', marginTop: '6px', textAlign: 'center' }}>
+              다운로드 중... {progress}%
+            </div>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          {!downloading && (
+            <button
+              onClick={onDismiss}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(0,0,0,0.2)',
+                color: '#555555',
+                padding: '10px 20px',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              나중에
+            </button>
+          )}
+          <button
+            onClick={onUpdate}
+            disabled={downloading}
+            style={{
+              backgroundColor: '#111111',
+              color: '#ffffff',
+              border: 'none',
+              padding: '10px 24px',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: downloading ? 'wait' : 'pointer',
+              fontFamily: 'inherit',
+              opacity: downloading ? 0.7 : 1,
+            }}
+          >
+            {downloading ? '설치 중...' : '지금 업데이트'}
+          </button>
         </div>
       </div>
     </div>

@@ -28,6 +28,11 @@
     "core:window:allow-primary-monitor",
     "core:window:allow-set-decorations",
     "core:window:allow-set-resizable",
-    "core:window:allow-set-focus"
+    "core:window:allow-set-focus",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:default",
+    "process:allow-restart"
   ]
 }

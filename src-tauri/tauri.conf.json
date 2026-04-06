@@ -32,6 +32,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": "v2Compatible"
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/shinnanchanguk/salpeeem-releases/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ1RDQ4RkRGMDc1MjBGOEYKUldTUEQxSUgzNC9VUmNtdkNpY3RDM2tPdVlJNG5RQjhkWU1VZlZWWllicEdtRU4yOFViWkdVU1kK"
+    }
   }
 }
