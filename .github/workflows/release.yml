@@ -1,0 +1,152 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: '살핌 ${{ github.ref_name }}'
+          releaseBody: ''
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  publish-to-releases-repo:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download draft release assets
+        uses: actions/github-script@v7
+        id: get-assets
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+
+            // Find the draft release
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const release = releases.data.find(r => r.tag_name === tag);
+            if (!release) throw new Error(`Release for tag ${tag} not found`);
+
+            // Download all assets
+            const fs = require('fs');
+            const path = require('path');
+            const dir = '/tmp/release-assets';
+            fs.mkdirSync(dir, { recursive: true });
+
+            const assetFiles = [];
+            for (const asset of release.assets) {
+              const response = await github.rest.repos.getReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: asset.id,
+                headers: { accept: 'application/octet-stream' },
+              });
+
+              const filePath = path.join(dir, asset.name);
+              fs.writeFileSync(filePath, Buffer.from(response.data));
+              assetFiles.push(filePath);
+              console.log(`Downloaded: ${asset.name}`);
+            }
+
+            // Also find latest.json from assets
+            core.setOutput('release-id', release.id);
+            core.setOutput('release-body', release.body || '');
+            core.setOutput('tag', tag);
+            return assetFiles;
+
+      - name: Create release on public repo
+        uses: actions/github-script@v7
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        with:
+          github-token: ${{ secrets.RELEASES_REPO_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const tag = '${{ steps.get-assets.outputs.tag }}';
+
+            // Create release on public repo
+            const release = await github.rest.repos.createRelease({
+              owner: 'shinnanchanguk',
+              repo: 'salpeeem-releases',
+              tag_name: tag,
+              name: `살핌 ${tag}`,
+              body: `${{ steps.get-assets.outputs.release-body }}`,
+              draft: false,
+              prerelease: false,
+            });
+
+            // Upload all assets
+            const dir = '/tmp/release-assets';
+            const files = fs.readdirSync(dir);
+            for (const file of files) {
+              const filePath = path.join(dir, file);
+              const stats = fs.statSync(filePath);
+              const data = fs.readFileSync(filePath);
+
+              await github.rest.repos.uploadReleaseAsset({
+                owner: 'shinnanchanguk',
+                repo: 'salpeeem-releases',
+                release_id: release.data.id,
+                name: file,
+                data: data,
+              });
+              console.log(`Uploaded: ${file}`);
+            }
+
+            console.log(`Release created: ${release.data.html_url}`);
+
+      - name: Delete draft from private repo
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const releaseId = ${{ steps.get-assets.outputs.release-id }};
+            await github.rest.repos.deleteRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+            });
+            console.log('Draft release deleted from private repo');
