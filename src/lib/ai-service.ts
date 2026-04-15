@@ -115,18 +115,24 @@ export async function generateAssignmentSentences(
   }));
 
   const systemPrompt =
-    '당신은 한국 중·고등학교 생활기록부 작성 전문가입니다. ' +
-    '아래는 과제에 대한 학생들의 제출물입니다. ' +
-    '과제 지시사항과 각 학생의 제출 내용을 바탕으로 생활기록부에 적합한 공식적인 문장을 학생별로 작성해주세요. ' +
-    '오타와 줄임말은 자연스럽게 교정하고, 학생의 긍정적인 면을 부각하되 사실에 기반한 표현을 사용하세요. ' +
-    '한 문장에서 세 문장 이내로 작성하세요. ' +
-    '결과를 반드시 다음 JSON 배열 형식으로만 출력하세요: [{"studentName": "학생1", "sentence": "..."}]';
+    '당신은 한국 중·고등학교 생활기록부 작성 전문가입니다.\n\n' +
+    '## 핵심 원칙\n' +
+    '1. 먼저 "과제 안내사항"을 꼼꼼히 읽고, 이 과제의 목적·주제·맥락을 정확히 파악하세요.\n' +
+    '2. 각 학생의 제출물을 과제 안내사항의 맥락 안에서 해석하세요. 단순 요약이 아니라, 해당 과제에서 학생이 보여준 역량·태도·성취를 서술해야 합니다.\n' +
+    '3. 과제 주제와 연결하여 학생의 구체적인 활동 내용과 그 의미를 생활기록부에 적합한 공식적 문장으로 작성하세요.\n\n' +
+    '## 작성 규칙\n' +
+    '- 오타와 줄임말은 자연스럽게 교정합니다.\n' +
+    '- 학생의 긍정적인 면을 부각하되, 사실에 기반한 표현을 사용합니다.\n' +
+    '- 한 문장에서 세 문장 이내로 작성합니다.\n' +
+    '- 결과를 반드시 다음 JSON 배열 형식으로만 출력하세요: [{"studentName": "학생1", "sentence": "..."}]';
 
   const submissionsText = indexMap
     .map((s) => `[${s.id}] ${s.content}`)
     .join('\n');
 
-  const userMessage = `과제 지시사항:\n${instructions}\n\n학생 제출물:\n${submissionsText}`;
+  const userMessage =
+    `## 과제 안내사항 (이 맥락을 반드시 반영하세요)\n${instructions}\n\n` +
+    `## 학생 제출물\n${submissionsText}`;
 
   const raw = await callOpenRouter([
     { role: 'system', content: systemPrompt },
@@ -159,18 +165,24 @@ export async function generateSurveySentences(
   }));
 
   const systemPrompt =
-    '당신은 한국 중·고등학교 생활기록부 작성 전문가입니다. ' +
-    '아래는 설문에 대한 학생들의 응답입니다. ' +
-    '설문 지시사항과 각 학생의 응답 내용을 바탕으로 생활기록부에 적합한 공식적인 문장을 학생별로 작성해주세요. ' +
-    '오타와 줄임말은 자연스럽게 교정하고, 학생의 긍정적인 면을 부각하되 사실에 기반한 표현을 사용하세요. ' +
-    '한 문장에서 세 문장 이내로 작성하세요. ' +
-    '결과를 반드시 다음 JSON 배열 형식으로만 출력하세요: [{"studentName": "학생1", "sentence": "..."}]';
+    '당신은 한국 중·고등학교 생활기록부 작성 전문가입니다.\n\n' +
+    '## 핵심 원칙\n' +
+    '1. 먼저 "설문 안내사항"을 꼼꼼히 읽고, 이 설문의 목적·주제·맥락을 정확히 파악하세요.\n' +
+    '2. 각 학생의 응답을 설문 안내사항의 맥락 안에서 해석하세요. 단순 요약이 아니라, 해당 설문에서 학생이 보여준 생각·태도·성찰을 서술해야 합니다.\n' +
+    '3. 설문 주제와 연결하여 학생의 구체적인 응답 내용과 그 의미를 생활기록부에 적합한 공식적 문장으로 작성하세요.\n\n' +
+    '## 작성 규칙\n' +
+    '- 오타와 줄임말은 자연스럽게 교정합니다.\n' +
+    '- 학생의 긍정적인 면을 부각하되, 사실에 기반한 표현을 사용합니다.\n' +
+    '- 한 문장에서 세 문장 이내로 작성합니다.\n' +
+    '- 결과를 반드시 다음 JSON 배열 형식으로만 출력하세요: [{"studentName": "학생1", "sentence": "..."}]';
 
   const responsesText = indexMap
     .map((s) => `[${s.id}] ${s.response}`)
     .join('\n');
 
-  const userMessage = `설문 지시사항:\n${instructions}\n\n학생 응답:\n${responsesText}`;
+  const userMessage =
+    `## 설문 안내사항 (이 맥락을 반드시 반영하세요)\n${instructions}\n\n` +
+    `## 학생 응답\n${responsesText}`;
 
   const raw = await callOpenRouter([
     { role: 'system', content: systemPrompt },
