@@ -662,6 +662,33 @@ export function AssignmentView() {
     return match?.id ?? null;
   };
 
+  // ── Save instructions only (no files required) ──────────────────
+  const handleSave = async () => {
+    if (!selectedFolder) return;
+
+    if (!taskDescription.trim()) {
+      alert(isSurveyMode ? '설문 안내사항을 입력해주세요.' : '과제 안내사항을 입력해주세요.');
+      return;
+    }
+
+    try {
+      await updateAssignmentFolder(
+        selectedFolder.id,
+        selectedFolder.name,
+        selectedGroupId ? Number(selectedGroupId) : null,
+        taskDescription,
+      );
+      await loadFolders();
+      // Update selectedFolder with saved data
+      const all = await getAssignmentFolders();
+      const updated = all.find((f) => f.id === selectedFolder.id);
+      if (updated) setSelectedFolder(updated);
+      alert('저장되었습니다.');
+    } catch (e) {
+      alert('저장 중 오류가 발생했습니다: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
   // ── Generate sentences ───────────────────────────────────────────
   const handleGenerate = async () => {
     if (!selectedFolder) return;
@@ -1330,7 +1357,7 @@ export function AssignmentView() {
             </div>
 
             {/* Form Actions */}
-            <div style={customStyles.formActions}>
+            <div style={{ ...customStyles.formActions, gap: '12px' }}>
               <button
                 style={{
                   ...customStyles.btnSubmitLarge,
@@ -1347,6 +1374,22 @@ export function AssignmentView() {
                 }}
               >
                 {generating ? '생성 중...' : '문장 생성하기'}
+              </button>
+              <button
+                style={{
+                  ...customStyles.btnSidebarAction,
+                  padding: '16px 32px',
+                  fontSize: '16px',
+                }}
+                onClick={handleSave}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.03)')
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.backgroundColor = 'transparent')
+                }
+              >
+                저장
               </button>
             </div>
           </div>
