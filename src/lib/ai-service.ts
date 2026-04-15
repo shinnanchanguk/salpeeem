@@ -24,9 +24,15 @@ export function setAIConfig(apiKey: string, model: string): void {
 
 // ── internal helpers ──
 
+interface MessageContentPart {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: { url: string };
+}
+
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | MessageContentPart[];
 }
 
 async function callOpenRouter(messages: ChatMessage[]): Promise<string> {
@@ -250,6 +256,47 @@ export async function refineDraft(
 
   const result = await callOpenRouter(messages);
   return result;
+}
+
+/**
+ * Extract text from images using Vision API (multimodal).
+ * Sends images to Gemini Vision and returns structured markdown text.
+ */
+export async function extractTextFromImages(
+  imageDataUrls: string[],
+  instructions?: string,
+): Promise<string> {
+  const systemPrompt =
+    '당신은 문서 텍스트 추출 전문가입니다. ' +
+    '이미지에서 모든 텍스트를 정확히 추출하여 마크다운 형식으로 출력하세요. ' +
+    '수학 공식은 LaTeX로 변환하고, 표는 마크다운 테이블로 변환하세요. ' +
+    '불확실한 글자는 [?]로 표시하세요. ' +
+    '추출된 텍스트만 출력하세요.';
+
+  const contentParts: MessageContentPart[] = [];
+
+  if (instructions) {
+    contentParts.push({ type: 'text', text: instructions });
+  }
+
+  contentParts.push({
+    type: 'text',
+    text: '아래 이미지에서 모든 텍스트, 수식, 표를 추출해주세요.',
+  });
+
+  for (const dataUrl of imageDataUrls) {
+    contentParts.push({
+      type: 'image_url',
+      image_url: { url: dataUrl },
+    });
+  }
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: contentParts },
+  ];
+
+  return await callOpenRouter(messages);
 }
 
 // ── JSON parsing helper ──

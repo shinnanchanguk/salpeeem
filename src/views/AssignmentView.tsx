@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useGroupStore } from '@/stores/useGroupStore';
 import { useStudentStore } from '@/stores/useStudentStore';
 import { useRecordStore } from '@/stores/useRecordStore';
-import { generateAssignmentSentences, generateSurveySentences } from '@/lib/ai-service';
+import { generateAssignmentSentences, generateSurveySentences, extractTextFromImages } from '@/lib/ai-service';
+import { extractText } from '@/lib/file-extractor';
 import {
   addAssignment,
   addSurvey,
@@ -687,15 +688,23 @@ export function AssignmentView() {
         taskDescription,
       );
 
-      // Read file contents
+      // Extract text from files (supports XLSX, PDF, DOCX, images, etc.)
       const fileData = await Promise.all(
         uploadedFiles.map(async (file) => {
           const studentName = extractNameFromFilename(file.name);
           let content = '';
           try {
-            content = await file.text();
+            const result = await extractText(file);
+            if (!result.success) {
+              content = result.error ?? `(${file.name} 파일 처리 실패)`;
+            } else if (result.needsVision && result.images && result.images.length > 0) {
+              // Use Vision API for scanned PDFs and images
+              content = await extractTextFromImages(result.images);
+            } else {
+              content = result.text;
+            }
           } catch {
-            content = `(${file.name} 파일 내용)`;
+            content = `(${file.name} 파일 내용 추출 실패)`;
           }
           return { studentName, content };
         }),
@@ -1230,7 +1239,7 @@ export function AssignmentView() {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".hwp,.docx,.pdf,.txt"
+                  accept=".hwp,.docx,.pdf,.txt,.xlsx,.xls,.csv,.jpg,.jpeg,.png"
                   style={{ display: 'none' }}
                   onChange={handleFileChange}
                 />
@@ -1266,7 +1275,7 @@ export function AssignmentView() {
                       여기로 파일을 드래그하세요
                     </div>
                     <div style={customStyles.uploadHint}>
-                      지원 파일: HWP, DOCX, PDF, TXT (최대 50MB)
+                      지원 파일: XLSX, PDF, DOCX, TXT, 이미지 (최대 50MB)
                     </div>
                   </>
                 )}
