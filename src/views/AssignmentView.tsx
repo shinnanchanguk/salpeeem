@@ -290,7 +290,8 @@ interface ResultItem {
   editText: string;
   studentId: number | null;
   groupId: number | null;
-  matchMethod?: 'student_id' | 'name' | 'none';
+  matchMethod?: 'student_id' | 'name' | 'none' | 'duplicate';
+  candidates?: Array<{ id: number; name: string; grade: string; class_name: string; student_no: number }>;
 }
 
 // ── Helper: extract student name from filename ───────────────────────
@@ -971,6 +972,7 @@ export function AssignmentView() {
           studentId: match.student?.id ?? null,
           groupId: selectedGroupId ? Number(selectedGroupId) : null,
           matchMethod: match.matchMethod,
+          candidates: match.candidates,
         };
       });
 
@@ -1290,14 +1292,14 @@ export function AssignmentView() {
                         <span
                           style={{
                             fontSize: '11px',
-                            color: '#D97706',
-                            backgroundColor: '#FEF3C7',
+                            color: item.matchMethod === 'duplicate' ? '#7C3AED' : '#D97706',
+                            backgroundColor: item.matchMethod === 'duplicate' ? '#EDE9FE' : '#FEF3C7',
                             padding: '2px 8px',
                             borderRadius: '4px',
                             fontWeight: 600,
                           }}
                         >
-                          매칭 안됨
+                          {item.matchMethod === 'duplicate' ? '동명이인' : '매칭 안됨'}
                         </span>
                         {!item.confirmed && (
                           <select
@@ -1305,9 +1307,9 @@ export function AssignmentView() {
                               fontSize: '12px',
                               padding: '2px 6px',
                               borderRadius: '4px',
-                              border: '1px solid #D97706',
-                              backgroundColor: '#FFFBEB',
-                              color: '#92400E',
+                              border: `1px solid ${item.matchMethod === 'duplicate' ? '#7C3AED' : '#D97706'}`,
+                              backgroundColor: item.matchMethod === 'duplicate' ? '#F5F3FF' : '#FFFBEB',
+                              color: item.matchMethod === 'duplicate' ? '#5B21B6' : '#92400E',
                               cursor: 'pointer',
                             }}
                             value=""
@@ -1318,15 +1320,20 @@ export function AssignmentView() {
                                 setResults((prev) =>
                                   prev.map((r, i) =>
                                     i === index
-                                      ? { ...r, studentId: sid, studentName: s.name, matchMethod: 'name' }
+                                      ? { ...r, studentId: sid, studentName: s.name, matchMethod: 'name', candidates: undefined }
                                       : r,
                                   ),
                                 );
                               }
                             }}
                           >
-                            <option value="" disabled>학생 직접 선택</option>
-                            {students.map((s) => (
+                            <option value="" disabled>
+                              {item.matchMethod === 'duplicate' ? '학생을 선택하세요' : '학생 직접 선택'}
+                            </option>
+                            {(item.candidates && item.candidates.length > 0
+                              ? item.candidates
+                              : students
+                            ).map((s) => (
                               <option key={s.id} value={s.id}>
                                 {s.grade} {s.class_name} {s.student_no}번 {s.name}
                               </option>

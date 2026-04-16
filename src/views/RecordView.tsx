@@ -406,7 +406,16 @@ function getStudentDisplayLabel(student: Student, allStudents: Student[]): strin
   return student.name;
 }
 
-/** @학생 태그에서 학생 파싱 */
+/** 자동완성에서 선택 시 input에 삽입할 태그 텍스트 — 동명이인이면 @이름(반_번호번) */
+function getStudentTagText(student: Student, allStudents: Student[]): string {
+  const sameNameStudents = allStudents.filter((s) => s.name === student.name);
+  if (sameNameStudents.length > 1) {
+    return `${student.name}(${student.class_name.replace(/\s/g, '')}_${student.student_no}번)`;
+  }
+  return student.name;
+}
+
+/** @학생 태그에서 학생 파싱 — 동명이인 구분 @이름(반_번호번) 지원 */
 function parseTags(
   input: string,
   students: Student[],
@@ -415,17 +424,34 @@ function parseTags(
   let studentId: number | null = null;
   let groupId: number | null = null;
 
-  const studentMatch = input.match(/@(\S+)/);
-  if (studentMatch) {
-    const name = studentMatch[1];
-    const found = students.find((s) => s.name === name);
+  // 동명이인 태그: @이름(반_번호번)
+  const detailedMatch = input.match(/@(\S+?)\((\S+?)_(\d+)번\)/);
+  if (detailedMatch) {
+    const name = detailedMatch[1];
+    const className = detailedMatch[2];
+    const studentNo = parseInt(detailedMatch[3], 10);
+    const found = students.find(
+      (s) => s.name === name && s.class_name.replace(/\s/g, '') === className && s.student_no === studentNo,
+    );
     if (found) studentId = found.id;
+  }
+
+  // 일반 태그: @이름
+  if (studentId === null) {
+    const studentMatch = input.match(/@(\S+?)(?:\(|[\s]|$)/);
+    if (studentMatch) {
+      const name = studentMatch[1];
+      const found = students.find((s) => s.name === name);
+      if (found) studentId = found.id;
+    }
   }
 
   const groupMatch = input.match(/\/(\S+)/);
   if (groupMatch) {
-    const name = groupMatch[1];
-    const found = groups.find((g) => g.name === name);
+    const pathStr = groupMatch[1];
+    // Try exact name match first, then match last segment of "parent-child" path
+    const lastSegment = pathStr.includes('-') ? pathStr.split('-').pop()! : pathStr;
+    const found = groups.find((g) => g.name === pathStr) || groups.find((g) => g.name === lastSegment);
     if (found) groupId = found.id;
   }
 
@@ -944,7 +970,8 @@ export function RecordView() {
           result.push({ type: 'header', label: key });
           studs.forEach((s) => {
             const label = getStudentDisplayLabel(s, students);
-            result.push({ type: 'item', label, value: s.name });
+            const value = getStudentTagText(s, students);
+            result.push({ type: 'item', label, value });
           });
         });
       return result;
@@ -958,17 +985,18 @@ export function RecordView() {
       const q = query.toLowerCase();
       const result: Array<{ type: 'item'; label: string; value: string; depth: number }> = [];
 
-      const flatten = (nodes: Group[], depth: number) => {
+      const flatten = (nodes: Group[], depth: number, parentPath: string) => {
         for (const g of nodes) {
+          const fullPath = parentPath ? `${parentPath}-${g.name}` : g.name;
           if (g.name.toLowerCase().includes(q)) {
-            result.push({ type: 'item' as const, label: g.name, value: g.name, depth });
+            result.push({ type: 'item' as const, label: g.name, value: fullPath, depth });
           }
           if (g.children && g.children.length > 0) {
-            flatten(g.children, depth + 1);
+            flatten(g.children, depth + 1, fullPath);
           }
         }
       };
-      flatten(groupTree, 0);
+      flatten(groupTree, 0, '');
 
       return result;
     },
@@ -1129,12 +1157,24 @@ export function RecordView() {
     if (acOpen && acSelectableItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setAcSelected((prev) => (prev + 1) % acSelectableItems.length);
+        setAcSelected((prev) => {
+          const next = (prev + 1) % acSelectableItems.length;
+          requestAnimationFrame(() => {
+            dropdownRef.current?.querySelector<HTMLElement>(`[data-ac-idx="${next}"]`)?.scrollIntoView({ block: 'nearest' });
+          });
+          return next;
+        });
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setAcSelected((prev) => (prev - 1 + acSelectableItems.length) % acSelectableItems.length);
+        setAcSelected((prev) => {
+          const next = (prev - 1 + acSelectableItems.length) % acSelectableItems.length;
+          requestAnimationFrame(() => {
+            dropdownRef.current?.querySelector<HTMLElement>(`[data-ac-idx="${next}"]`)?.scrollIntoView({ block: 'nearest' });
+          });
+          return next;
+        });
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
@@ -1316,7 +1356,7 @@ export function RecordView() {
                     border: '1px solid #000000',
                     borderRadius: '8px',
                     boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
-                    maxHeight: '200px',
+                    maxHeight: '60vh',
                     overflowY: 'auto',
                     zIndex: 100,
                     minWidth: '180px',
@@ -1346,6 +1386,7 @@ export function RecordView() {
                     return (
                       <div
                         key={`item-${idx}`}
+                        data-ac-idx={selectableIdx}
                         style={{
                           padding: '8px 16px',
                           paddingLeft: `${16 + depth * 16}px`,

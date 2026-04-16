@@ -101,7 +101,7 @@ export function TabNavigation({
 
   return (
     <div style={styles.tabsContainer}>
-      <div style={styles.appLogo} data-tour="app-logo">{logo}</div>
+      <div style={{ ...styles.appLogo, cursor: 'pointer' }} data-tour="app-logo" onClick={() => onTabChange(0)}>{logo}</div>
       <div data-tour="tab-area" style={{ display: 'flex', alignItems: 'flex-end' }}>
       {TAB_LABELS.map((label, i) => {
         const isActive = activeTab === i;

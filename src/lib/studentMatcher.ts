@@ -115,8 +115,9 @@ export function extractNameFromFilename(filename: string): string {
 
 export interface MatchResult {
   student: Student | null;
-  matchMethod: 'student_id' | 'name' | 'none';
+  matchMethod: 'student_id' | 'name' | 'none' | 'duplicate';
   parsedId?: ParsedStudentId;
+  candidates?: Student[];
 }
 
 /** 학생 목록에서 학번으로 매칭 */
@@ -131,17 +132,30 @@ export function matchStudentById(
   }) ?? null;
 }
 
-/** 학생 목록에서 이름으로 매칭 */
+/** 학생 목록에서 이름으로 매칭 — 동명이인이면 유일 매칭만 반환 */
 export function matchStudentByName(name: string, students: Student[]): Student | null {
-  // 완전 일치
-  const exact = students.find((s) => s.name === name);
-  if (exact) return exact;
+  // 완전 일치 — 유일하면 반환, 동명이인이면 null
+  const exactMatches = students.filter((s) => s.name === name);
+  if (exactMatches.length === 1) return exactMatches[0];
+  if (exactMatches.length > 1) return null; // 동명이인 → candidates로 처리
 
-  // 부분 일치
-  const partial = students.find(
+  // 부분 일치 — 유일하면 반환
+  const partialMatches = students.filter(
     (s) => s.name.includes(name) || name.includes(s.name)
   );
-  return partial ?? null;
+  if (partialMatches.length === 1) return partialMatches[0];
+  return null;
+}
+
+/** 이름으로 후보 학생 목록 조회 (동명이인 포함) */
+export function findStudentCandidatesByName(name: string, students: Student[]): Student[] {
+  const exact = students.filter((s) => s.name === name);
+  if (exact.length > 0) return exact;
+
+  const partial = students.filter(
+    (s) => s.name.includes(name) || name.includes(s.name)
+  );
+  return partial;
 }
 
 /** 파일명에서 학생 매칭 (학번 우선 → 이름 폴백) */
@@ -165,6 +179,11 @@ export function matchStudentFromFilename(
     const student = matchStudentByName(name, students);
     if (student) {
       return { student, matchMethod: 'name' };
+    }
+    // 동명이인 감지
+    const candidates = findStudentCandidatesByName(name, students);
+    if (candidates.length > 1) {
+      return { student: null, matchMethod: 'duplicate', candidates };
     }
   }
 
