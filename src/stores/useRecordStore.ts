@@ -7,6 +7,7 @@ import {
   addRecord as dbAddRecord,
   updateRecordAssignment,
   updateRecordImportance,
+  updateRecordText as dbUpdateRecordText,
   deleteRecord as dbDeleteRecord,
   getRecordsByFilter,
 } from '@/lib/database';
@@ -30,6 +31,7 @@ interface RecordStore {
   ) => Promise<void>;
   assignRecord: (id: number, student_id: number, group_id: number) => Promise<void>;
   updateImportance: (id: number, importance: Importance) => Promise<void>;
+  updateRecordText: (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => Promise<void>;
   deleteRecord: (id: number) => Promise<void>;
   getFilteredRecords: (studentIds?: number[], groupIds?: number[]) => Promise<Record[]>;
 }
@@ -102,6 +104,16 @@ export const useRecordStore = create<RecordStore>((set, get) => ({
       await get().fetchRecords();
     } catch (error) {
       console.error('Failed to update importance:', error);
+    }
+  },
+
+  updateRecordText: async (id, raw_input, generated_sentence, is_edited) => {
+    try {
+      await dbUpdateRecordText(id, raw_input, generated_sentence, is_edited);
+      await get().fetchRecords();
+      await get().fetchInboxRecords();
+    } catch (error) {
+      console.error('Failed to update record text:', error);
     }
   },
 

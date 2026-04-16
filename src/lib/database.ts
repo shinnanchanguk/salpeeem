@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS records (
   source TEXT DEFAULT '기록',
   importance TEXT DEFAULT '보통',
   assignment_folder_id INTEGER DEFAULT NULL,
+  is_edited INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime')),
   FOREIGN KEY(student_id) REFERENCES students(id),
   FOREIGN KEY(group_id) REFERENCES groups(id),
@@ -310,6 +311,7 @@ function createInMemoryDb(): DatabaseLike {
           source: bindValues[4] ?? '기록',
           importance: bindValues[5] ?? '보통',
           assignment_folder_id: bindValues[6] ?? null,
+          is_edited: 0,
           created_at: new Date().toISOString(),
         });
         return { rowsAffected: 1, lastInsertId: id };
@@ -328,6 +330,16 @@ function createInMemoryDb(): DatabaseLike {
         const row = (tables.records as any[]).find((r) => r.id === bindValues[1]);
         if (row) {
           row.importance = bindValues[0];
+        }
+        return { rowsAffected: row ? 1 : 0, lastInsertId: 0 };
+      }
+      // UPDATE records SET raw_input / generated_sentence / is_edited
+      if (q.startsWith('UPDATE RECORDS') && q.includes('RAW_INPUT')) {
+        const row = (tables.records as any[]).find((r) => r.id === bindValues[3]);
+        if (row) {
+          row.raw_input = bindValues[0];
+          row.generated_sentence = bindValues[1];
+          row.is_edited = bindValues[2];
         }
         return { rowsAffected: row ? 1 : 0, lastInsertId: 0 };
       }
@@ -741,6 +753,19 @@ export async function updateRecordAssignment(
 export async function updateRecordImportance(id: number, importance: Importance): Promise<void> {
   const d = await getDb();
   await d.execute('UPDATE records SET importance = $1 WHERE id = $2', [importance, id]);
+}
+
+export async function updateRecordText(
+  id: number,
+  raw_input: string,
+  generated_sentence: string,
+  is_edited: boolean
+): Promise<void> {
+  const d = await getDb();
+  await d.execute(
+    'UPDATE records SET raw_input = $1, generated_sentence = $2, is_edited = $3 WHERE id = $4',
+    [raw_input, generated_sentence, is_edited ? 1 : 0, id]
+  );
 }
 
 export async function deleteRecord(id: number): Promise<void> {

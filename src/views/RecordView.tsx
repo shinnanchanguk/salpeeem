@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useRecordStore } from '@/stores/useRecordStore';
 import { useStudentStore } from '@/stores/useStudentStore';
 import { useGroupStore } from '@/stores/useGroupStore';
@@ -6,9 +6,10 @@ import { convertToFormalSentence } from '@/lib/ai-service';
 import type { Record as RecordType, Student, Group } from '@/types';
 import { getByteLength } from '@/types';
 
-// ── Helper: build highlighted HTML from input text ──
-
 // ── Styles (from RecordScreen design component) ──
+
+const QUICK_TEXTAREA_MIN_HEIGHT = 80;
+const QUICK_TEXTAREA_MENTION_REGEX = /(^|\s)([@/]\S*)/g;
 
 const customStyles: { [key: string]: React.CSSProperties } = {
   sidebar: {
@@ -92,18 +93,60 @@ const customStyles: { [key: string]: React.CSSProperties } = {
     padding: '6px',
     boxShadow: '0 4px 16px rgba(0,0,0,0.06), inset 0 2px 4px rgba(0,0,0,0.02)',
   },
+  quickTextareaField: {
+    position: 'relative',
+    flex: 1,
+    minWidth: 0,
+  },
+  quickTextareaOverlay: {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    fontSize: '15px',
+    lineHeight: 1.6,
+    color: '#111111',
+    fontFamily: 'inherit',
+    padding: '12px 16px',
+    minHeight: `${QUICK_TEXTAREA_MIN_HEIGHT}px`,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    overflow: 'hidden',
+    boxSizing: 'border-box',
+  },
+  quickTextareaPlaceholder: {
+    color: '#8A8A86',
+  },
+  quickTextareaMentionStudent: {
+    backgroundColor: '#FDE68A',
+    borderRadius: '4px',
+    boxDecorationBreak: 'clone',
+    WebkitBoxDecorationBreak: 'clone',
+  },
+  quickTextareaMentionGroup: {
+    backgroundColor: '#A7F3D0',
+    borderRadius: '4px',
+    boxDecorationBreak: 'clone',
+    WebkitBoxDecorationBreak: 'clone',
+  },
   quickTextarea: {
     flex: 1,
+    width: '100%',
     border: 'none',
     resize: 'none',
     background: 'transparent',
     outline: 'none',
     fontSize: '15px',
     lineHeight: 1.6,
-    color: '#111111',
     fontFamily: 'inherit',
     padding: '12px 16px',
     minHeight: '80px',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    position: 'relative',
+    zIndex: 1,
+    color: 'transparent',
+    caretColor: '#111111',
+    WebkitTextFillColor: 'transparent',
   },
   btnSubmit: {
     backgroundColor: '#111111',
@@ -369,6 +412,48 @@ const FolderIcon: React.FC = () => (
     <path d="M22 19A2 2 0 0120 21H4A2 2 0 012 19V5A2 2 0 014 3H9L11 6H20A2 2 0 0122 8Z" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+function renderQuickInputHighlight(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+
+  QUICK_TEXTAREA_MENTION_REGEX.lastIndex = 0;
+
+  while ((match = QUICK_TEXTAREA_MENTION_REGEX.exec(text)) !== null) {
+    const prefix = match[1];
+    const token = match[2];
+    const matchStart = match.index;
+    const tokenStart = matchStart + prefix.length;
+
+    if (cursor < matchStart) {
+      parts.push(<React.Fragment key={`text-${key++}`}>{text.slice(cursor, matchStart)}</React.Fragment>);
+    }
+
+    if (prefix) {
+      parts.push(<React.Fragment key={`space-${key++}`}>{prefix}</React.Fragment>);
+    }
+
+    parts.push(
+      <span
+        key={`mention-${key++}`}
+        style={token.startsWith('@') ? customStyles.quickTextareaMentionStudent : customStyles.quickTextareaMentionGroup}
+      >
+        {token}
+      </span>,
+    );
+
+    cursor = tokenStart + token.length;
+  }
+
+  if (cursor < text.length) {
+    parts.push(<React.Fragment key={`tail-${key++}`}>{text.slice(cursor)}</React.Fragment>);
+  }
+
+  parts.push(<span key="buffer">{'\u200B'}</span>);
+  return parts;
+}
 
 // ── Helpers ──
 
@@ -834,31 +919,146 @@ const GroupDialog: React.FC<GroupDialogProps> = ({ mode, parentId, initialName, 
   );
 };
 
+// ── Editable Text Field ──
+
+interface EditableTextProps {
+  value: string;
+  onSave: (newValue: string) => void;
+  saving?: boolean;
+  style?: React.CSSProperties;
+}
+
+const EditableText: React.FC<EditableTextProps> = ({ value, onSave, saving, style }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editing && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  }, [editing]);
+
+  const handleSave = () => {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== value) {
+      onSave(trimmed);
+    }
+    setEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setDraft(value);
+      setEditing(false);
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSave();
+    }
+  };
+
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            e.target.style.height = 'auto';
+            e.target.style.height = e.target.scrollHeight + 'px';
+          }}
+          onBlur={handleSave}
+          onKeyDown={handleKeyDown}
+          disabled={saving}
+          style={{
+            ...style,
+            width: '100%',
+            border: '1px solid #D1D5DB',
+            borderRadius: '6px',
+            padding: '6px 8px',
+            fontSize: '13px',
+            fontFamily: 'inherit',
+            lineHeight: 1.5,
+            resize: 'none',
+            outline: 'none',
+            overflow: 'hidden',
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => { setDraft(value); setEditing(true); }}
+      style={{ ...style, cursor: 'pointer', borderRadius: '4px', padding: '2px 4px', margin: '-2px -4px', transition: 'background 0.15s' }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0.04)'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+      title="클릭하여 수정"
+    >
+      {value}
+    </div>
+  );
+};
+
 // ── Inbox Item ──
 
 interface InboxItemComponentProps {
   record: RecordType;
   onAssign: (id: number) => void;
+  onUpdateText: (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => Promise<void>;
 }
 
-const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssign }) => {
+const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssign, onUpdateText }) => {
   const [assignHover, setAssignHover] = useState(false);
+  const [reconverting, setReconverting] = useState(false);
   const cleaned = record.raw_input.replace(/@\S+/g, '').replace(/\/\S+/g, '').trim();
   const isPassthrough = record.generated_sentence === cleaned || record.generated_sentence === record.raw_input;
+
+  const handleRawSave = async (newRaw: string) => {
+    setReconverting(true);
+    try {
+      const result = await convertToFormalSentence(newRaw);
+      await onUpdateText(record.id, newRaw, result.sentence, false);
+    } catch {
+      await onUpdateText(record.id, newRaw, record.generated_sentence, false);
+    } finally {
+      setReconverting(false);
+    }
+  };
+
+  const handleSentenceSave = async (newSentence: string) => {
+    await onUpdateText(record.id, record.raw_input, newSentence, true);
+  };
 
   return (
     <div style={customStyles.inboxItem}>
       <div style={customStyles.itemMeta}>
         <span>{formatTime(record.created_at)}</span>
         <span style={customStyles.badgeSource}>{record.source}</span>
+        {record.is_edited && (
+          <span style={{ fontSize: '11px', color: '#6B7280', background: '#F3F4F6', padding: '1px 6px', borderRadius: '4px' }}>
+            수정됨
+          </span>
+        )}
       </div>
       <div style={customStyles.contentComparison}>
-        <div style={customStyles.rawText}>{record.raw_input}</div>
+        <div style={customStyles.rawText}>
+          <EditableText value={record.raw_input} onSave={handleRawSave} saving={reconverting} />
+        </div>
         <div style={customStyles.transformIcon}>
-          <ArrowRightIcon />
+          {reconverting ? (
+            <span style={{ fontSize: '11px', color: '#6B7280' }}>변환중...</span>
+          ) : (
+            <ArrowRightIcon />
+          )}
         </div>
         <div style={customStyles.formalText}>
-          {record.generated_sentence}
+          <EditableText value={record.generated_sentence} onSave={handleSentenceSave} />
           <span style={{ color: '#999', fontSize: '12px', marginLeft: '6px', whiteSpace: 'nowrap' }}>
             {getByteLength(record.generated_sentence)}B
           </span>
@@ -891,13 +1091,31 @@ const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssig
 interface RecordItemComponentProps {
   record: RecordType;
   students: Student[];
+  onUpdateText: (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => Promise<void>;
 }
 
-const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students }) => {
+const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students, onUpdateText }) => {
   const studentName = record.student_name ?? students.find((s) => s.id === record.student_id)?.name ?? '미지정';
   const groupName = record.group_name ?? '미지정';
+  const [reconverting, setReconverting] = useState(false);
   const cleaned = record.raw_input.replace(/@\S+/g, '').replace(/\/\S+/g, '').trim();
   const isPassthrough = record.generated_sentence === cleaned || record.generated_sentence === record.raw_input;
+
+  const handleRawSave = async (newRaw: string) => {
+    setReconverting(true);
+    try {
+      const result = await convertToFormalSentence(newRaw);
+      await onUpdateText(record.id, newRaw, result.sentence, false);
+    } catch {
+      await onUpdateText(record.id, newRaw, record.generated_sentence, false);
+    } finally {
+      setReconverting(false);
+    }
+  };
+
+  const handleSentenceSave = async (newSentence: string) => {
+    await onUpdateText(record.id, record.raw_input, newSentence, true);
+  };
 
   return (
     <div style={customStyles.inboxItem}>
@@ -906,14 +1124,25 @@ const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, stude
         <span style={customStyles.badgeSource}>{record.source}</span>
         <span style={customStyles.badgeStudent}>{studentName}</span>
         <span style={customStyles.badgeStudent}>{groupName}</span>
+        {record.is_edited && (
+          <span style={{ fontSize: '11px', color: '#6B7280', background: '#F3F4F6', padding: '1px 6px', borderRadius: '4px' }}>
+            수정됨
+          </span>
+        )}
       </div>
       <div style={customStyles.contentComparison}>
-        <div style={customStyles.rawText}>{record.raw_input}</div>
+        <div style={customStyles.rawText}>
+          <EditableText value={record.raw_input} onSave={handleRawSave} saving={reconverting} />
+        </div>
         <div style={customStyles.transformIcon}>
-          <ArrowRightIcon />
+          {reconverting ? (
+            <span style={{ fontSize: '11px', color: '#6B7280' }}>변환중...</span>
+          ) : (
+            <ArrowRightIcon />
+          )}
         </div>
         <div style={customStyles.formalText}>
-          {record.generated_sentence}
+          <EditableText value={record.generated_sentence} onSave={handleSentenceSave} />
           <span style={{ color: '#999', fontSize: '12px', marginLeft: '6px', whiteSpace: 'nowrap' }}>
             {getByteLength(record.generated_sentence)}B
           </span>
@@ -939,6 +1168,7 @@ export function RecordView() {
     fetchGroupRecords,
     addRecord,
     assignRecord,
+    updateRecordText,
   } = useRecordStore();
   const { students, fetchStudents } = useStudentStore();
   const {
@@ -956,6 +1186,13 @@ export function RecordView() {
   const [submitHover, setSubmitHover] = useState(false);
   const [newGroupHover, setNewGroupHover] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+
+  const handleUpdateRecordText = async (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => {
+    await updateRecordText(id, raw_input, generated_sentence, is_edited);
+    if (selectedGroupId !== null) {
+      await fetchGroupRecords(selectedGroupId);
+    }
+  };
 
   const [assigningRecordId, setAssigningRecordId] = useState<number | null>(null);
   const [groupDialog, setGroupDialog] = useState<{
@@ -1030,6 +1267,14 @@ export function RecordView() {
 
   const acSuggestions = acType === 'student' ? getStudentSuggestions(acQuery) : getGroupSuggestions(acQuery);
   const acSelectableItems = acSuggestions.filter((s) => s.type === 'item');
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = '0px';
+    textarea.style.height = `${Math.max(textarea.scrollHeight, QUICK_TEXTAREA_MIN_HEIGHT)}px`;
+  }, [inputText]);
 
   const computeDropdownPosition = useCallback(() => {
     const textarea = textareaRef.current;
@@ -1257,7 +1502,13 @@ export function RecordView() {
 
   return (
     <>
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .quick-textarea::placeholder {
+          color: transparent;
+          -webkit-text-fill-color: transparent;
+        }
+      `}</style>
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         {/* Sidebar */}
@@ -1347,28 +1598,42 @@ export function RecordView() {
           {/* Quick Input */}
           <div style={customStyles.quickInputZone} data-tour="quick-input">
             <div style={{ ...customStyles.inputWrapper, position: 'relative' }}>
-              <textarea
-                ref={textareaRef}
-                className="quick-textarea"
-                style={customStyles.quickTextarea}
-                spellCheck={false}
-                placeholder={
-                  isInbox
-                    ? '관찰을 적으세요. @학생 /그룹으로 바로 분류됩니다'
-                    : `관찰을 적으세요. @학생으로 태그하면 ${selectedGroupName}에 저장됩니다`
-                }
-                value={inputText}
-                onChange={handleTextChange}
-                onKeyDown={handleKeyDown}
-                onClick={() => {
-                  const ta = textareaRef.current;
-                  if (ta) detectAutocomplete(inputText, ta.selectionStart);
-                }}
-                onBlur={() => {
-                  setTimeout(() => setAcOpen(false), 200);
-                }}
-                disabled={aiLoading}
-              />
+              <div style={customStyles.quickTextareaField}>
+                <div style={customStyles.quickTextareaOverlay} aria-hidden="true">
+                  {inputText ? (
+                    renderQuickInputHighlight(inputText)
+                  ) : (
+                    <span style={customStyles.quickTextareaPlaceholder}>
+                      {isInbox
+                        ? '관찰을 적으세요. @학생 /그룹으로 바로 분류됩니다'
+                        : `관찰을 적으세요. @학생으로 태그하면 ${selectedGroupName}에 저장됩니다`}
+                    </span>
+                  )}
+                </div>
+                <textarea
+                  ref={textareaRef}
+                  className="quick-textarea"
+                  rows={1}
+                  style={customStyles.quickTextarea}
+                  spellCheck={false}
+                  placeholder={
+                    isInbox
+                      ? '관찰을 적으세요. @학생 /그룹으로 바로 분류됩니다'
+                      : `관찰을 적으세요. @학생으로 태그하면 ${selectedGroupName}에 저장됩니다`
+                  }
+                  value={inputText}
+                  onChange={handleTextChange}
+                  onKeyDown={handleKeyDown}
+                  onClick={() => {
+                    const ta = textareaRef.current;
+                    if (ta) detectAutocomplete(inputText, ta.selectionStart);
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setAcOpen(false), 200);
+                  }}
+                  disabled={aiLoading}
+                />
+              </div>
               {/* Autocomplete Dropdown */}
               {acOpen && acSelectableItems.length > 0 && (
                 <div
@@ -1487,12 +1752,14 @@ export function RecordView() {
                       key={record.id}
                       record={record}
                       onAssign={(id) => setAssigningRecordId(id)}
+                      onUpdateText={handleUpdateRecordText}
                     />
                   ) : (
                     <RecordItemComponent
                       key={record.id}
                       record={record}
                       students={students}
+                      onUpdateText={handleUpdateRecordText}
                     />
                   ),
                 )}

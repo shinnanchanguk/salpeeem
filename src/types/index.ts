@@ -34,6 +34,7 @@ export interface Record {
   source: RecordSource;
   importance: Importance;
   assignment_folder_id: number | null;
+  is_edited: boolean;
   created_at: string;
   /** Joined fields (optional) */
   student_name?: string;
