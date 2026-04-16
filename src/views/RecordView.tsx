@@ -7,23 +7,6 @@ import type { Record as RecordType, Student, Group } from '@/types';
 
 // ── Helper: build highlighted HTML from input text ──
 
-const TEXTAREA_FONT = 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif';
-
-function buildHighlightedHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(
-      /(^|\s)(@\S+)/g,
-      '$1<span style="background:#FDE68A;border-radius:3px;padding:1px 0">$2</span>',
-    )
-    .replace(
-      /(^|\s)(\/\S+)/g,
-      '$1<span style="background:#A7F3D0;border-radius:3px;padding:1px 0">$2</span>',
-    ) + '\n';
-}
-
 // ── Styles (from RecordScreen design component) ──
 
 const customStyles: { [key: string]: React.CSSProperties } = {
@@ -117,11 +100,9 @@ const customStyles: { [key: string]: React.CSSProperties } = {
     fontSize: '15px',
     lineHeight: 1.6,
     color: '#111111',
-    fontFamily: TEXTAREA_FONT,
+    fontFamily: 'inherit',
     padding: '12px 16px',
     minHeight: '80px',
-    overflow: 'hidden',
-    boxSizing: 'border-box' as const,
   },
   btnSubmit: {
     backgroundColor: '#111111',
@@ -936,7 +917,6 @@ export function RecordView() {
 
   // Autocomplete state
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLDivElement>(null);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [acOpen, setAcOpen] = useState(false);
@@ -1302,58 +1282,28 @@ export function RecordView() {
           {/* Quick Input */}
           <div style={customStyles.quickInputZone} data-tour="quick-input">
             <div style={{ ...customStyles.inputWrapper, position: 'relative' }}>
-              <div style={{ position: 'relative', flex: 1 }}>
-                {/* Highlight overlay — only when text exists */}
-                {inputText && (
-                  <div
-                    ref={highlightRef}
-                    aria-hidden="true"
-                    style={{
-                      ...customStyles.quickTextarea,
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      minHeight: 'unset',
-                      pointerEvents: 'none',
-                      color: '#111111',
-                      whiteSpace: 'pre-wrap',
-                      wordWrap: 'break-word',
-                      overflow: 'hidden',
-                    }}
-                    dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(inputText) }}
-                  />
-                )}
-                <textarea
-                  ref={textareaRef}
-                  className="quick-textarea"
-                  style={{
-                    ...customStyles.quickTextarea,
-                    position: 'relative',
-                    color: inputText ? 'transparent' : '#111111',
-                    caretColor: '#111111',
-                    background: 'transparent',
-                  }}
-                  spellCheck={false}
-                  placeholder={
-                    isInbox
-                      ? '관찰을 적으세요. @학생 /그룹으로 바로 분류됩니다'
-                      : `관찰을 적으세요. @학생으로 태그하면 ${selectedGroupName}에 저장됩니다`
-                  }
-                  value={inputText}
-                  onChange={handleTextChange}
-                  onKeyDown={handleKeyDown}
-                  onClick={() => {
-                    const ta = textareaRef.current;
-                    if (ta) detectAutocomplete(inputText, ta.selectionStart);
-                  }}
-                  onBlur={() => {
-                    setTimeout(() => setAcOpen(false), 200);
-                  }}
-                  disabled={aiLoading}
-                />
-              </div>
+              <textarea
+                ref={textareaRef}
+                className="quick-textarea"
+                style={customStyles.quickTextarea}
+                spellCheck={false}
+                placeholder={
+                  isInbox
+                    ? '관찰을 적으세요. @학생 /그룹으로 바로 분류됩니다'
+                    : `관찰을 적으세요. @학생으로 태그하면 ${selectedGroupName}에 저장됩니다`
+                }
+                value={inputText}
+                onChange={handleTextChange}
+                onKeyDown={handleKeyDown}
+                onClick={() => {
+                  const ta = textareaRef.current;
+                  if (ta) detectAutocomplete(inputText, ta.selectionStart);
+                }}
+                onBlur={() => {
+                  setTimeout(() => setAcOpen(false), 200);
+                }}
+                disabled={aiLoading}
+              />
               {/* Autocomplete Dropdown */}
               {acOpen && acSelectableItems.length > 0 && (
                 <div
