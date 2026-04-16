@@ -843,6 +843,8 @@ interface InboxItemComponentProps {
 
 const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssign }) => {
   const [assignHover, setAssignHover] = useState(false);
+  const cleaned = record.raw_input.replace(/@\S+/g, '').replace(/\/\S+/g, '').trim();
+  const isPassthrough = record.generated_sentence === cleaned || record.generated_sentence === record.raw_input;
 
   return (
     <div style={customStyles.inboxItem}>
@@ -862,6 +864,11 @@ const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssig
           </span>
         </div>
       </div>
+      {isPassthrough && (
+        <div style={{ padding: '4px 12px 8px', fontSize: '12px', color: '#B45309', lineHeight: 1.4 }}>
+          AI가 의미가 없는 문장으로 인식하고 그대로 반환했습니다
+        </div>
+      )}
       <div style={customStyles.itemActions}>
         <button
           style={{
@@ -889,6 +896,8 @@ interface RecordItemComponentProps {
 const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students }) => {
   const studentName = record.student_name ?? students.find((s) => s.id === record.student_id)?.name ?? '미지정';
   const groupName = record.group_name ?? '미지정';
+  const cleaned = record.raw_input.replace(/@\S+/g, '').replace(/\/\S+/g, '').trim();
+  const isPassthrough = record.generated_sentence === cleaned || record.generated_sentence === record.raw_input;
 
   return (
     <div style={customStyles.inboxItem}>
@@ -910,6 +919,11 @@ const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, stude
           </span>
         </div>
       </div>
+      {isPassthrough && (
+        <div style={{ padding: '4px 12px 8px', fontSize: '12px', color: '#B45309', lineHeight: 1.4 }}>
+          AI가 의미가 없는 문장으로 인식하고 그대로 반환했습니다
+        </div>
+      )}
     </div>
   );
 };
@@ -1136,10 +1150,6 @@ export function RecordView() {
     }
   }, [selectedGroupId, fetchGroupRecords]);
 
-  // Conversion note (shown transiently after AI returns a note)
-  const [conversionNote, setConversionNote] = useState<string | null>(null);
-  const noteTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
   // Submit quick record
   const handleSubmit = async () => {
     const text = inputText.trim();
@@ -1151,16 +1161,9 @@ export function RecordView() {
 
     setAiLoading(true);
     setInputText('');
-    setConversionNote(null);
     try {
       const result = await convertToFormalSentence(text);
       await addRecord(text, result.sentence, studentId, finalGroupId, '기록', '보통');
-      // Show note if AI returned one
-      if (result.note) {
-        setConversionNote(result.note);
-        if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
-        noteTimerRef.current = setTimeout(() => setConversionNote(null), 8000);
-      }
       // Refresh appropriate list
       if (finalGroupId === null) {
         await fetchInboxRecords();
@@ -1455,43 +1458,6 @@ export function RecordView() {
               </button>
             </div>
           </div>
-
-          {/* Conversion Note */}
-          {conversionNote && (
-            <div
-              style={{
-                margin: '0 16px',
-                padding: '10px 14px',
-                background: '#FFF7ED',
-                border: '1px solid #FDBA74',
-                borderRadius: '8px',
-                fontSize: '13px',
-                color: '#9A3412',
-                lineHeight: 1.5,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                gap: '8px',
-              }}
-            >
-              <span>{conversionNote}</span>
-              <button
-                onClick={() => setConversionNote(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: '#9A3412',
-                  fontSize: '16px',
-                  lineHeight: 1,
-                  flexShrink: 0,
-                  padding: 0,
-                }}
-              >
-                &times;
-              </button>
-            </div>
-          )}
 
           {/* List Zone */}
           <div style={customStyles.listZone}>
