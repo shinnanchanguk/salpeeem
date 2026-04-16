@@ -5,6 +5,23 @@ import { useGroupStore } from '@/stores/useGroupStore';
 import { convertToFormalSentence } from '@/lib/ai-service';
 import type { Record as RecordType, Student, Group } from '@/types';
 
+// ── Helper: build highlighted HTML from input text ──
+
+function buildHighlightedHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(
+      /(^|\s)(@\S+)/g,
+      '$1<span style="background:#FDE68A;border-radius:3px;padding:1px 0">$2</span>',
+    )
+    .replace(
+      /(^|\s)(\/\S+)/g,
+      '$1<span style="background:#A7F3D0;border-radius:3px;padding:1px 0">$2</span>',
+    ) + '\n';
+}
+
 // ── Styles (from RecordScreen design component) ──
 
 const customStyles: { [key: string]: React.CSSProperties } = {
@@ -915,6 +932,7 @@ export function RecordView() {
 
   // Autocomplete state
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [acOpen, setAcOpen] = useState(false);
   const [acType, setAcType] = useState<'student' | 'group'>('student');
@@ -949,15 +967,27 @@ export function RecordView() {
     [students],
   );
 
-  // Group autocomplete suggestions
+  // Group autocomplete suggestions with hierarchy
   const getGroupSuggestions = useCallback(
-    (query: string): Array<{ type: 'item'; label: string; value: string }> => {
+    (query: string): Array<{ type: 'item'; label: string; value: string; depth: number }> => {
       const q = query.toLowerCase();
-      return groups
-        .filter((g) => g.name.toLowerCase().includes(q))
-        .map((g) => ({ type: 'item' as const, label: g.name, value: g.name }));
+      const result: Array<{ type: 'item'; label: string; value: string; depth: number }> = [];
+
+      const flatten = (nodes: Group[], depth: number) => {
+        for (const g of nodes) {
+          if (g.name.toLowerCase().includes(q)) {
+            result.push({ type: 'item' as const, label: g.name, value: g.name, depth });
+          }
+          if (g.children && g.children.length > 0) {
+            flatten(g.children, depth + 1);
+          }
+        }
+      };
+      flatten(groupTree, 0);
+
+      return result;
     },
-    [groups],
+    [groupTree],
   );
 
   const acSuggestions = acType === 'student' ? getStudentSuggestions(acQuery) : getGroupSuggestions(acQuery);
@@ -1266,28 +1296,62 @@ export function RecordView() {
           {/* Quick Input */}
           <div style={customStyles.quickInputZone} data-tour="quick-input">
             <div style={{ ...customStyles.inputWrapper, position: 'relative' }}>
-              <textarea
-                ref={textareaRef}
-                className="quick-textarea"
-                style={customStyles.quickTextarea}
-                spellCheck={false}
-                placeholder={
-                  isInbox
-                    ? '관찰을 적으세요. @학생 /그룹으로 바로 분류됩니다'
-                    : `관찰을 적으세요. @학생으로 태그하면 ${selectedGroupName}에 저장됩니다`
-                }
-                value={inputText}
-                onChange={handleTextChange}
-                onKeyDown={handleKeyDown}
-                onClick={() => {
-                  const ta = textareaRef.current;
-                  if (ta) detectAutocomplete(inputText, ta.selectionStart);
-                }}
-                onBlur={() => {
-                  setTimeout(() => setAcOpen(false), 200);
-                }}
-                disabled={aiLoading}
-              />
+              <div style={{ position: 'relative', flex: 1 }}>
+                {/* Visible text layer with highlights */}
+                <div
+                  ref={highlightRef}
+                  aria-hidden="true"
+                  style={{
+                    ...customStyles.quickTextarea,
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    minHeight: 'unset',
+                    pointerEvents: 'none',
+                    color: '#111111',
+                    whiteSpace: 'pre-wrap',
+                    wordWrap: 'break-word',
+                    overflow: 'hidden',
+                  }}
+                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(inputText) }}
+                />
+                {/* Invisible textarea for input handling */}
+                <textarea
+                  ref={textareaRef}
+                  className="quick-textarea"
+                  style={{
+                    ...customStyles.quickTextarea,
+                    position: 'relative',
+                    background: 'transparent',
+                    color: 'transparent',
+                    caretColor: '#111111',
+                  }}
+                  spellCheck={false}
+                  placeholder={
+                    isInbox
+                      ? '관찰을 적으세요. @학생 /그룹으로 바로 분류됩니다'
+                      : `관찰을 적으세요. @학생으로 태그하면 ${selectedGroupName}에 저장됩니다`
+                  }
+                  value={inputText}
+                  onChange={handleTextChange}
+                  onKeyDown={handleKeyDown}
+                  onClick={() => {
+                    const ta = textareaRef.current;
+                    if (ta) detectAutocomplete(inputText, ta.selectionStart);
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setAcOpen(false), 200);
+                  }}
+                  onScroll={(e) => {
+                    if (highlightRef.current) {
+                      highlightRef.current.scrollTop = e.currentTarget.scrollTop;
+                    }
+                  }}
+                  disabled={aiLoading}
+                />
+              </div>
               {/* Autocomplete Dropdown */}
               {acOpen && acSelectableItems.length > 0 && (
                 <div
@@ -1326,11 +1390,13 @@ export function RecordView() {
                     }
                     const selectableIdx = acSelectableItems.indexOf(item as typeof acSelectableItems[number]);
                     const isItemSelected = selectableIdx === acSelected;
+                    const depth = 'depth' in item ? (item as { depth: number }).depth : 0;
                     return (
                       <div
                         key={`item-${idx}`}
                         style={{
                           padding: '8px 16px',
+                          paddingLeft: `${16 + depth * 16}px`,
                           cursor: 'pointer',
                           fontSize: '14px',
                           color: '#111111',
@@ -1348,6 +1414,7 @@ export function RecordView() {
                           insertAutocomplete(item.value);
                         }}
                       >
+                        {depth > 0 && <span style={{ color: '#999999', marginRight: '4px' }}>└</span>}
                         {item.label}
                       </div>
                     );
