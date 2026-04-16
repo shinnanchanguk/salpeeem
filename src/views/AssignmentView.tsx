@@ -343,18 +343,11 @@ interface FolderTreeItemProps {
   depth: number;
   selectedId: number | null;
   expandedIds: Set<number>;
-  hoveredId: number | null;
-  renamingId: number | null;
-  renameText: string;
   onSelect: (folder: AssignmentFolder) => void;
   onToggleExpand: (id: number) => void;
-  onHover: (id: number | null) => void;
-  onAddChild: (parentId: number) => void;
-  onDelete: (id: number) => void;
-  onStartRename: (id: number, currentName: string) => void;
-  onRenameChange: (text: string) => void;
-  onRenameConfirm: (id: number) => void;
-  onRenameCancelFn: () => void;
+  onAddSubfolder: (parentId: number) => void;
+  onRename: (folder: AssignmentFolder) => void;
+  onDelete: (folder: AssignmentFolder) => void;
 }
 
 function FolderTreeItem({
@@ -362,43 +355,36 @@ function FolderTreeItem({
   depth,
   selectedId,
   expandedIds,
-  hoveredId,
-  renamingId,
-  renameText,
   onSelect,
   onToggleExpand,
-  onHover,
-  onAddChild,
+  onAddSubfolder,
+  onRename,
   onDelete,
-  onStartRename,
-  onRenameChange,
-  onRenameConfirm,
-  onRenameCancelFn,
 }: FolderTreeItemProps) {
+  const [hovered, setHovered] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
   const isSelected = selectedId === folder.id;
   const isExpanded = expandedIds.has(folder.id);
-  const isHovered = hoveredId === folder.id;
-  const isRenaming = renamingId === folder.id;
   const hasChildren = (folder.children?.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [showMenu]);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onSelect(folder);
     if (hasChildren) {
       onToggleExpand(folder.id);
-    }
-  };
-
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onStartRename(folder.id, folder.name);
-  };
-
-  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      onRenameConfirm(folder.id);
-    } else if (e.key === 'Escape') {
-      onRenameCancelFn();
     }
   };
 
@@ -412,7 +398,7 @@ function FolderTreeItem({
           borderLeft: isSelected ? '3px solid #111111' : '3px solid transparent',
           backgroundColor: isSelected
             ? 'rgba(0,0,0,0.05)'
-            : isHovered
+            : hovered
               ? 'rgba(0,0,0,0.03)'
               : 'transparent',
           display: 'flex',
@@ -422,9 +408,8 @@ function FolderTreeItem({
           position: 'relative',
         }}
         onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
-        onMouseEnter={() => onHover(folder.id)}
-        onMouseLeave={() => onHover(null)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
         {/* Expand/collapse caret */}
         <span
@@ -447,92 +432,129 @@ function FolderTreeItem({
           {hasChildren || depth === 0 ? '\uD83D\uDCC1' : '\uD83D\uDCC2'}
         </span>
 
-        {/* Name or rename input */}
-        {isRenaming ? (
-          <input
-            autoFocus
-            value={renameText}
-            onChange={(e) => onRenameChange(e.target.value)}
-            onKeyDown={handleRenameKeyDown}
-            onBlur={() => onRenameConfirm(folder.id)}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              flex: 1,
-              fontSize: '14px',
-              fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
-              border: '1px solid #000000',
-              borderRadius: '4px',
-              padding: '2px 6px',
-              outline: 'none',
-              backgroundColor: '#ffffff',
-              color: '#111111',
-              minWidth: 0,
-            }}
-          />
-        ) : (
-          <span
-            style={{
-              fontSize: '14px',
-              color: '#111111',
-              fontWeight: isSelected ? 600 : 500,
-              flex: 1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {folder.name}
-          </span>
-        )}
+        {/* Name */}
+        <span
+          style={{
+            fontSize: '14px',
+            color: '#111111',
+            fontWeight: isSelected ? 600 : 500,
+            flex: 1,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {folder.name}
+        </span>
 
-        {/* Hover actions */}
-        {isHovered && !isRenaming && (
-          <span
-            style={{
-              display: 'flex',
-              gap: '4px',
-              flexShrink: 0,
-            }}
-          >
+        {/* MoreIcon button */}
+        {hovered && (
+          <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
             <button
-              title="하위 폴더 추가"
               onClick={(e) => {
                 e.stopPropagation();
-                onAddChild(folder.id);
+                setShowMenu((prev) => !prev);
               }}
               style={{
-                background: 'none',
+                background: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
-                color: '#555555',
-                fontSize: '16px',
-                padding: '0 2px',
-                lineHeight: 1,
-                fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
+                color: '#555',
+                padding: '2px',
+                display: 'flex',
+                alignItems: 'center',
               }}
             >
-              +
+              <MoreIcon />
             </button>
-            <button
-              title="삭제"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(folder.id);
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: '#555555',
-                fontSize: '16px',
-                padding: '0 2px',
-                lineHeight: 1,
-                fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
-              }}
-            >
-              ×
-            </button>
-          </span>
+
+            {showMenu && (
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: '100%',
+                  background: '#ffffff',
+                  border: '1px solid #000000',
+                  borderRadius: '8px',
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+                  zIndex: 200,
+                  minWidth: '140px',
+                  overflow: 'hidden',
+                }}
+              >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    onAddSubfolder(folder.id);
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    padding: '10px 16px',
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                    color: '#111111',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.05)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  하위 폴더 추가
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    onRename(folder);
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    padding: '10px 16px',
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                    color: '#111111',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.05)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  이름 변경
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    onDelete(folder);
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    padding: '10px 16px',
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                    color: '#cc3333',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.05)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  삭제
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -551,24 +573,118 @@ function FolderTreeItem({
             depth={depth + 1}
             selectedId={selectedId}
             expandedIds={expandedIds}
-            hoveredId={hoveredId}
-            renamingId={renamingId}
-            renameText={renameText}
             onSelect={onSelect}
             onToggleExpand={onToggleExpand}
-            onHover={onHover}
-            onAddChild={onAddChild}
+            onAddSubfolder={onAddSubfolder}
+            onRename={onRename}
             onDelete={onDelete}
-            onStartRename={onStartRename}
-            onRenameChange={onRenameChange}
-            onRenameConfirm={onRenameConfirm}
-            onRenameCancelFn={onRenameCancelFn}
           />
         ))}
       </div>
     </div>
   );
 }
+
+// ── Folder dialog component ─────────────────────────────────────────
+interface FolderDialogProps {
+  mode: 'create' | 'rename';
+  parentId?: number | null;
+  initialName?: string;
+  initialFolderType?: 'assignment' | 'survey';
+  folderTree: AssignmentFolder[];
+  onConfirm: (name: string, parentId: number | null, folderType: 'assignment' | 'survey') => void;
+  onClose: () => void;
+}
+
+const FolderDialog: React.FC<FolderDialogProps> = ({
+  mode, parentId, initialName, initialFolderType, folderTree, onConfirm, onClose,
+}) => {
+  const [name, setName] = useState(initialName ?? '');
+  const [selectedParent, setSelectedParent] = useState<number | null>(parentId ?? null);
+  const [folderType, setFolderType] = useState<'assignment' | 'survey'>(initialFolderType ?? 'assignment');
+
+  const renderFolderOptions = (folders: AssignmentFolder[], depth: number = 0): React.ReactNode[] => {
+    const options: React.ReactNode[] = [];
+    for (const f of folders) {
+      const prefix = '\u00A0\u00A0'.repeat(depth);
+      options.push(
+        <option key={f.id} value={f.id}>{prefix}{f.name}</option>
+      );
+      if (f.children && f.children.length > 0) {
+        options.push(...renderFolderOptions(f.children, depth + 1));
+      }
+    }
+    return options;
+  };
+
+  return (
+    <div style={customStyles.overlay as React.CSSProperties} onClick={onClose}>
+      <div style={customStyles.dialog as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
+        <div style={customStyles.dialogTitle}>
+          {mode === 'create' ? '새 폴더 만들기' : '폴더 이름 변경'}
+        </div>
+
+        <div>
+          <div style={customStyles.dialogLabel}>폴더 이름</div>
+          <input
+            style={customStyles.dialogInput as React.CSSProperties}
+            placeholder="예: 1학기 중간 과제"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && name.trim()) {
+                onConfirm(name.trim(), selectedParent, folderType);
+              }
+            }}
+          />
+        </div>
+
+        {mode === 'create' && (
+          <>
+            <div>
+              <div style={customStyles.dialogLabel}>유형</div>
+              <select
+                style={customStyles.dialogSelect}
+                value={folderType}
+                onChange={(e) => setFolderType(e.target.value as 'assignment' | 'survey')}
+              >
+                <option value="assignment">과제</option>
+                <option value="survey">설문</option>
+              </select>
+            </div>
+            <div>
+              <div style={customStyles.dialogLabel}>상위 폴더 (선택사항)</div>
+              <select
+                style={customStyles.dialogSelect}
+                value={selectedParent ?? ''}
+                onChange={(e) => setSelectedParent(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">없음 (최상위)</option>
+                {renderFolderOptions(folderTree)}
+              </select>
+            </div>
+          </>
+        )}
+
+        <div style={customStyles.dialogActions}>
+          <button style={customStyles.btnCancel} onClick={onClose}>취소</button>
+          <button
+            style={{
+              ...customStyles.btnConfirm,
+              opacity: name.trim() ? 1 : 0.4,
+              cursor: name.trim() ? 'pointer' : 'default',
+            }}
+            onClick={() => { if (name.trim()) onConfirm(name.trim(), selectedParent, folderType); }}
+            disabled={!name.trim()}
+          >
+            {mode === 'create' ? '만들기' : '변경'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export function AssignmentView() {
   // ── Stores ───────────────────────────────────────────────────────
@@ -581,10 +697,16 @@ export function AssignmentView() {
   const [folderTree, setFolderTree] = useState<AssignmentFolder[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<AssignmentFolder | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
-  const [hoveredFolderId, setHoveredFolderId] = useState<number | null>(null);
-  const [renamingId, setRenamingId] = useState<number | null>(null);
-  const [renameText, setRenameText] = useState<string>('');
   const [filterType, setFilterType] = useState<'all' | 'assignment' | 'survey'>('all');
+  const [folderDialog, setFolderDialog] = useState<{
+    open: boolean;
+    mode: 'create' | 'rename';
+    parentId: number | null;
+    folderId?: number;
+    initialName?: string;
+    initialFolderType?: 'assignment' | 'survey';
+  }>({ open: false, mode: 'create', parentId: null });
+  const [newFolderHover, setNewFolderHover] = useState(false);
 
   // ── Form state ───────────────────────────────────────────────────
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
@@ -622,78 +744,37 @@ export function AssignmentView() {
   }, []);
 
   // ── Folder actions ───────────────────────────────────────────────
-  const handleAddTopLevelFolder = async () => {
-    const name = '새 폴더';
-    const folderType = filterType === 'survey' ? 'survey' : 'assignment';
-    const result = await addAssignmentFolder(name, null, folderType as 'assignment' | 'survey');
-    await loadFolders();
-    // Auto-select and start renaming
-    const all = await getAssignmentFolders();
-    const newFolder = all.find((f) => f.id === result.lastInsertId);
-    if (newFolder) {
-      setSelectedFolder(newFolder);
-      setRenamingId(newFolder.id);
-      setRenameText(newFolder.name);
+  const handleFolderDialogConfirm = async (name: string, parentId: number | null, folderType: 'assignment' | 'survey') => {
+    if (folderDialog.mode === 'create') {
+      await addAssignmentFolder(name, parentId, folderType);
+      if (parentId !== null) {
+        setExpandedIds((prev) => new Set([...prev, parentId]));
+      }
+    } else if (folderDialog.folderId) {
+      const folder = folders.find((f) => f.id === folderDialog.folderId);
+      await updateAssignmentFolder(folderDialog.folderId, name, folder?.group_id, folder?.instructions);
+      if (selectedFolder?.id === folderDialog.folderId) {
+        const all = await getAssignmentFolders();
+        const updated = all.find((f) => f.id === folderDialog.folderId);
+        if (updated) setSelectedFolder(updated);
+      }
     }
+    setFolderDialog({ open: false, mode: 'create', parentId: null });
+    await loadFolders();
   };
 
-  const handleAddChildFolder = async (parentId: number) => {
-    const parent = folders.find((f) => f.id === parentId);
-    const folderType = parent?.folder_type || 'assignment';
-    const result = await addAssignmentFolder('새 폴더', parentId, folderType as 'assignment' | 'survey');
-    // Expand parent
-    setExpandedIds((prev) => new Set([...prev, parentId]));
-    await loadFolders();
-    // Auto-select and start renaming
-    const all = await getAssignmentFolders();
-    const newFolder = all.find((f) => f.id === result.lastInsertId);
-    if (newFolder) {
-      setSelectedFolder(newFolder);
-      setRenamingId(newFolder.id);
-      setRenameText(newFolder.name);
-    }
-  };
-
-  const handleDeleteFolder = async (id: number) => {
-    const folder = folders.find((f) => f.id === id);
-    if (!folder) return;
-    const childCount = folders.filter((f) => f.parent_id === id).length;
+  const handleDeleteFolder = async (folder: AssignmentFolder) => {
+    const childCount = folders.filter((f) => f.parent_id === folder.id).length;
     const msg = childCount > 0
       ? `"${folder.name}" 폴더와 하위 ${childCount}개 폴더를 삭제하시겠습니까?`
       : `"${folder.name}" 폴더를 삭제하시겠습니까?`;
     if (!confirm(msg)) return;
-    await deleteAssignmentFolder(id);
-    if (selectedFolder?.id === id) {
+    await deleteAssignmentFolder(folder.id);
+    if (selectedFolder?.id === folder.id) {
       setSelectedFolder(null);
       resetForm();
     }
     await loadFolders();
-  };
-
-  const handleStartRename = (id: number, currentName: string) => {
-    setRenamingId(id);
-    setRenameText(currentName);
-  };
-
-  const handleRenameConfirm = async (id: number) => {
-    if (renameText.trim()) {
-      const folder = folders.find((f) => f.id === id);
-      await updateAssignmentFolder(id, renameText.trim(), folder?.group_id, folder?.instructions);
-      await loadFolders();
-      // Update selectedFolder if it was renamed
-      if (selectedFolder?.id === id) {
-        const all = await getAssignmentFolders();
-        const updated = all.find((f) => f.id === id);
-        if (updated) setSelectedFolder(updated);
-      }
-    }
-    setRenamingId(null);
-    setRenameText('');
-  };
-
-  const handleRenameCancel = () => {
-    setRenamingId(null);
-    setRenameText('');
   };
 
   const handleSelectFolder = (folder: AssignmentFolder) => {
@@ -1106,9 +1187,17 @@ export function AssignmentView() {
                 <button
                   onClick={resetForm}
                   style={{
-                    ...customStyles.btnSidebarAction,
                     padding: '12px 28px',
+                    borderRadius: '8px',
+                    border: '1px solid #000000',
+                    background: 'transparent',
                     fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#111111',
+                    cursor: 'pointer',
+                    textAlign: 'center' as const,
+                    transition: 'all 0.2s',
+                    fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
                   }}
                   onMouseEnter={(e) =>
                     (e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.03)')
@@ -1479,9 +1568,17 @@ export function AssignmentView() {
               </button>
               <button
                 style={{
-                  ...customStyles.btnSidebarAction,
                   padding: '16px 32px',
+                  borderRadius: '8px',
+                  border: '1px solid #000000',
+                  background: 'transparent',
                   fontSize: '16px',
+                  fontWeight: 600,
+                  color: '#111111',
+                  cursor: 'pointer',
+                  textAlign: 'center' as const,
+                  transition: 'all 0.2s',
+                  fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
                 }}
                 onClick={handleSave}
                 onMouseEnter={(e) =>
@@ -1504,23 +1601,8 @@ export function AssignmentView() {
     <div style={{ display: 'flex', width: '100%', height: '100%' }}>
       {/* Sidebar */}
       <div style={customStyles.sidebar}>
+        {/* Filter tabs only - no "new folder" button at top */}
         <div style={customStyles.sidebarActions}>
-          <button
-            style={{
-              ...customStyles.btnSidebarAction,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-            }}
-            onClick={handleAddTopLevelFolder}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.03)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-          >
-            {'\uD83D\uDCC1'} 새 폴더
-          </button>
-
-          {/* Filter tabs */}
           <div
             style={{
               display: 'flex',
@@ -1547,8 +1629,7 @@ export function AssignmentView() {
                     fontWeight: 600,
                     cursor: 'pointer',
                     transition: 'all 0.15s',
-                    fontFamily:
-                      'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
+                    fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
                   }}
                 >
                   {label}
@@ -1559,7 +1640,6 @@ export function AssignmentView() {
         </div>
 
         <div style={customStyles.sidebarDivider} />
-
         <div style={customStyles.sidebarHeader}>폴더</div>
 
         <div style={customStyles.historyList}>
@@ -1575,25 +1655,60 @@ export function AssignmentView() {
               depth={0}
               selectedId={selectedFolder?.id ?? null}
               expandedIds={expandedIds}
-              hoveredId={hoveredFolderId}
-              renamingId={renamingId}
-              renameText={renameText}
               onSelect={handleSelectFolder}
               onToggleExpand={handleToggleExpand}
-              onHover={setHoveredFolderId}
-              onAddChild={handleAddChildFolder}
+              onAddSubfolder={(parentId) => {
+                const parent = folders.find((f) => f.id === parentId);
+                setFolderDialog({
+                  open: true,
+                  mode: 'create',
+                  parentId,
+                  initialFolderType: (parent?.folder_type as 'assignment' | 'survey') || 'assignment',
+                });
+              }}
+              onRename={(f) => setFolderDialog({
+                open: true,
+                mode: 'rename',
+                parentId: f.parent_id,
+                folderId: f.id,
+                initialName: f.name,
+                initialFolderType: f.folder_type as 'assignment' | 'survey',
+              })}
               onDelete={handleDeleteFolder}
-              onStartRename={handleStartRename}
-              onRenameChange={setRenameText}
-              onRenameConfirm={handleRenameConfirm}
-              onRenameCancelFn={handleRenameCancel}
             />
           ))}
         </div>
+
+        {/* Bottom: new folder button (RecordView style) */}
+        <button
+          style={{
+            ...customStyles.btnNewView,
+            ...(newFolderHover ? { color: '#111111', backgroundColor: 'rgba(0,0,0,0.02)' } : {}),
+          }}
+          onMouseEnter={() => setNewFolderHover(true)}
+          onMouseLeave={() => setNewFolderHover(false)}
+          onClick={() => setFolderDialog({ open: true, mode: 'create', parentId: null })}
+        >
+          <PlusIcon />
+          새 폴더 만들기
+        </button>
       </div>
 
       {/* Main Content */}
       <div style={customStyles.mainContent}>{renderRightPanel()}</div>
+
+      {/* Folder Create/Rename Dialog */}
+      {folderDialog.open && (
+        <FolderDialog
+          mode={folderDialog.mode}
+          parentId={folderDialog.parentId}
+          initialName={folderDialog.initialName}
+          initialFolderType={folderDialog.initialFolderType}
+          folderTree={folderTree}
+          onConfirm={handleFolderDialogConfirm}
+          onClose={() => setFolderDialog({ open: false, mode: 'create', parentId: null })}
+        />
+      )}
     </div>
   );
 }
