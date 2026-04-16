@@ -46,11 +46,9 @@ CREATE TABLE IF NOT EXISTS records (
   group_id INTEGER,
   source TEXT DEFAULT '기록',
   importance TEXT DEFAULT '보통',
-  assignment_folder_id INTEGER DEFAULT NULL,
   created_at TEXT DEFAULT (datetime('now','localtime')),
   FOREIGN KEY(student_id) REFERENCES students(id),
-  FOREIGN KEY(group_id) REFERENCES groups(id),
-  FOREIGN KEY(assignment_folder_id) REFERENCES assignment_folders(id)
+  FOREIGN KEY(group_id) REFERENCES groups(id)
 );
 
 CREATE TABLE IF NOT EXISTS assignments (
@@ -159,11 +157,6 @@ function createInMemoryDb(): DatabaseLike {
             (r) => r.student_id === sId && r.group_id === gId
           ).length;
           return [{ count }] as unknown as T;
-        }
-        if (q.includes('ASSIGNMENT_FOLDER_ID') && bindValues.length === 1) {
-          return (tables.records as any[]).filter(
-            (r: any) => r.assignment_folder_id === bindValues[0]
-          ) as unknown as T;
         }
         if (q.includes('IS NULL')) {
           return (tables.records as any[]).filter(
@@ -309,7 +302,6 @@ function createInMemoryDb(): DatabaseLike {
           group_id: bindValues[3] ?? null,
           source: bindValues[4] ?? '기록',
           importance: bindValues[5] ?? '보통',
-          assignment_folder_id: bindValues[6] ?? null,
           created_at: new Date().toISOString(),
         });
         return { rowsAffected: 1, lastInsertId: id };
@@ -472,15 +464,6 @@ export async function initDatabase(): Promise<DatabaseLike> {
     }
 
     db = instance as unknown as DatabaseLike;
-
-    // Migration: add assignment_folder_id to records if not exists
-    try {
-      await instance.execute(
-        'ALTER TABLE records ADD COLUMN assignment_folder_id INTEGER DEFAULT NULL REFERENCES assignment_folders(id)'
-      );
-    } catch {
-      // column already exists — ignore
-    }
   } catch (e) {
     console.warn('[salpeem] Tauri SQL not available, using in-memory stub:', e);
     db = createInMemoryDb();
@@ -706,13 +689,12 @@ export async function addRecord(
   student_id?: number | null,
   group_id?: number | null,
   source?: RecordSource,
-  importance?: Importance,
-  assignment_folder_id?: number | null
+  importance?: Importance
 ): Promise<{ lastInsertId: number }> {
   const d = await getDb();
   return d.execute(
-    `INSERT INTO records (raw_input, generated_sentence, student_id, group_id, source, importance, assignment_folder_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    `INSERT INTO records (raw_input, generated_sentence, student_id, group_id, source, importance)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
       raw_input,
       generated_sentence,
@@ -720,7 +702,6 @@ export async function addRecord(
       group_id ?? null,
       source ?? '기록',
       importance ?? '보통',
-      assignment_folder_id ?? null,
     ]
   );
 }
@@ -934,42 +915,4 @@ export async function getAssignmentFolderChildren(parent_id: number | null): Pro
     'SELECT * FROM assignment_folders WHERE parent_id = $1 ORDER BY created_at ASC',
     [parent_id]
   );
-}
-
-// ─── Records by assignment folder ────────────────────────────────────
-export async function getRecordsByAssignmentFolder(folderId: number): Promise<SalpeemRecord[]> {
-  const d = await getDb();
-  return d.select<SalpeemRecord[]>(`
-    SELECT r.*, s.name AS student_name, g.name AS group_name
-    FROM records r
-    LEFT JOIN students s ON r.student_id = s.id
-    LEFT JOIN groups g ON r.group_id = g.id
-    WHERE r.assignment_folder_id = $1
-    ORDER BY r.created_at DESC
-  `, [folderId]);
-}
-
-// ─── Seed test students ──────────────────────────────────────────────
-const KOREAN_LAST_NAMES = ['김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권','황','안','송','류','전'];
-const KOREAN_FIRST_NAMES = ['민준','서윤','예준','하은','도윤','지우','시우','서연','하준','지민','은우','수아','지호','다은','예서','지아','현우','채원','준서','소율','건우','지윤','유준','나은','선우','하윤','민서','가은','우진','수민'];
-
-export async function seedTestStudents(): Promise<void> {
-  const d = await getDb();
-  const existing = await d.select<Student[]>('SELECT * FROM students');
-  if (existing.length > 0) return; // already has students
-
-  for (let classNum = 1; classNum <= 5; classNum++) {
-    for (let num = 1; num <= 20; num++) {
-      const lastName = KOREAN_LAST_NAMES[Math.floor(Math.random() * KOREAN_LAST_NAMES.length)];
-      const firstName = KOREAN_FIRST_NAMES[Math.floor(Math.random() * KOREAN_FIRST_NAMES.length)];
-      const name = lastName + firstName;
-      const grade = '1학년';
-      const className = `${classNum}반`;
-      const studentNo = num;
-      await d.execute(
-        'INSERT INTO students (name, grade, class_name, student_no) VALUES ($1, $2, $3, $4)',
-        [name, grade, className, studentNo]
-      );
-    }
-  }
 }

@@ -250,10 +250,9 @@ const sidebarItems = ['학생 명단 관리', '영역 관리', 'AI 연결', '단
 
 const StudentListSection: React.FC = () => {
   const { students, loading, fetchStudents, addStudent, updateStudent, deleteStudent } = useStudentStore();
-  const { settings, updateSetting, saveAllSettings } = useSettingsStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
-  const [form, setForm] = useState({ name: '', grade: '', class_name: '', student_no: 0 });
+  const [form, setForm] = useState({ name: '', grade: '', class_name: '' });
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const [hoveredEditBtn, setHoveredEditBtn] = useState<number | null>(null);
   const [hoveredDeleteBtn, setHoveredDeleteBtn] = useState<number | null>(null);
@@ -265,28 +264,28 @@ const StudentListSection: React.FC = () => {
 
   const openAddModal = () => {
     setEditingStudent(null);
-    setForm({ name: '', grade: '', class_name: '', student_no: 0 });
+    setForm({ name: '', grade: '', class_name: '' });
     setModalOpen(true);
   };
 
   const openEditModal = (student: Student) => {
     setEditingStudent(student);
-    setForm({ name: student.name, grade: student.grade, class_name: student.class_name, student_no: student.student_no });
+    setForm({ name: student.name, grade: student.grade, class_name: student.class_name });
     setModalOpen(true);
   };
 
   const closeModal = () => {
     setModalOpen(false);
     setEditingStudent(null);
-    setForm({ name: '', grade: '', class_name: '', student_no: 0 });
+    setForm({ name: '', grade: '', class_name: '' });
   };
 
   const handleSave = async () => {
     if (!form.name.trim() || !form.grade.trim() || !form.class_name.trim()) return;
     if (editingStudent) {
-      await updateStudent(editingStudent.id, form.name.trim(), form.grade.trim(), form.class_name.trim(), form.student_no);
+      await updateStudent(editingStudent.id, form.name.trim(), form.grade.trim(), form.class_name.trim());
     } else {
-      await addStudent(form.name.trim(), form.grade.trim(), form.class_name.trim(), form.student_no);
+      await addStudent(form.name.trim(), form.grade.trim(), form.class_name.trim());
     }
     closeModal();
   };
@@ -312,8 +311,7 @@ const StudentListSection: React.FC = () => {
       for (let i = startIdx; i < lines.length; i++) {
         const cols = lines[i].split(/[,\t]/).map((c) => c.trim());
         if (cols.length >= 3 && cols[0] && cols[1] && cols[2]) {
-          const studentNo = cols[3] ? parseInt(cols[3], 10) || 0 : 0;
-          await addStudent(cols[0], cols[1], cols[2], studentNo);
+          await addStudent(cols[0], cols[1], cols[2]);
         }
       }
     };
@@ -326,28 +324,7 @@ const StudentListSection: React.FC = () => {
     <>
       <div style={customStyles.sectionHeader}>
         <h1 style={customStyles.sectionTitle}>학생 명단 관리</h1>
-        <p style={customStyles.sectionDesc}>엑셀 업로드 또는 직접 추가. 학년·반·이름·번호 포함.</p>
-      </div>
-
-      {/* 학번 패턴 설정 */}
-      <div style={{ ...customStyles.tableCard, marginBottom: '16px', padding: '16px 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <label style={{ ...customStyles.formLabel, margin: 0, whiteSpace: 'nowrap' }}>학번 체계</label>
-          <select
-            value={settings.student_id_pattern}
-            onChange={async (e) => {
-              updateSetting('student_id_pattern', e.target.value as any);
-              await saveAllSettings();
-            }}
-            style={{ ...customStyles.formInput, width: 'auto', minWidth: '320px' }}
-          >
-            <option value="G1C1N2">학년(1자리) + 반(1자리) + 번호(2자리) — 예: 1502</option>
-            <option value="G1C2N2">학년(1자리) + 반(2자리) + 번호(2자리) — 예: 10502</option>
-          </select>
-          <span style={{ fontSize: '13px', color: '#555555' }}>
-            과제 파일명에서 학번을 자동 인식할 때 사용됩니다.
-          </span>
-        </div>
+        <p style={customStyles.sectionDesc}>엑셀 업로드 또는 직접 추가. 학년·반·이름 포함.</p>
       </div>
 
       <div style={customStyles.actionBar}>
@@ -394,10 +371,9 @@ const StudentListSection: React.FC = () => {
           <table style={customStyles.dataTable}>
             <thead>
               <tr>
-                <th style={{ ...customStyles.th, width: '25%' }}>이름</th>
-                <th style={{ ...customStyles.th, width: '20%' }}>학년</th>
-                <th style={{ ...customStyles.th, width: '20%' }}>반</th>
-                <th style={{ ...customStyles.th, width: '15%' }}>번호</th>
+                <th style={{ ...customStyles.th, width: '30%' }}>이름</th>
+                <th style={{ ...customStyles.th, width: '25%' }}>학년</th>
+                <th style={{ ...customStyles.th, width: '25%' }}>반</th>
                 <th style={{ ...customStyles.thRight, width: '20%' }}></th>
               </tr>
             </thead>
@@ -412,7 +388,6 @@ const StudentListSection: React.FC = () => {
                   <td style={{ ...customStyles.td, borderBottom: idx === students.length - 1 ? 'none' : '1px solid rgba(0,0,0,0.08)' }}>{student.name}</td>
                   <td style={{ ...customStyles.td, borderBottom: idx === students.length - 1 ? 'none' : '1px solid rgba(0,0,0,0.08)' }}>{student.grade}</td>
                   <td style={{ ...customStyles.td, borderBottom: idx === students.length - 1 ? 'none' : '1px solid rgba(0,0,0,0.08)' }}>{student.class_name}</td>
-                  <td style={{ ...customStyles.td, borderBottom: idx === students.length - 1 ? 'none' : '1px solid rgba(0,0,0,0.08)' }}>{student.student_no || '-'}</td>
                   <td style={{ ...customStyles.tdLast, borderBottom: idx === students.length - 1 ? 'none' : '1px solid rgba(0,0,0,0.08)' }}>
                     <div style={customStyles.rowActions}>
                       <button
@@ -469,17 +444,6 @@ const StudentListSection: React.FC = () => {
                 value={form.class_name}
                 onChange={(e) => setForm({ ...form, class_name: e.target.value })}
                 placeholder="예: 1반"
-              />
-            </div>
-            <div style={customStyles.formGroup}>
-              <label style={customStyles.formLabel}>번호</label>
-              <input
-                style={customStyles.formInput}
-                type="number"
-                min={0}
-                value={form.student_no}
-                onChange={(e) => setForm({ ...form, student_no: parseInt(e.target.value, 10) || 0 })}
-                placeholder="예: 15"
               />
             </div>
             <div style={customStyles.modalActions}>

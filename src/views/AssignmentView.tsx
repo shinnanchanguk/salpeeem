@@ -11,11 +11,8 @@ import {
   addAssignmentFolder,
   updateAssignmentFolder,
   deleteAssignmentFolder,
-  getRecordsByAssignmentFolder,
 } from '@/lib/database';
-import { useSettingsStore } from '@/stores/useSettingsStore';
-import { matchStudentFromFilename } from '@/lib/studentMatcher';
-import type { AssignmentFolder, RecordSource, Record as SalpeemRecord } from '@/types';
+import type { AssignmentFolder, RecordSource } from '@/types';
 
 // ── Styles (kept from original) ────────────────────────────────────
 const customStyles: Record<string, React.CSSProperties> = {
@@ -289,8 +286,6 @@ interface ResultItem {
   editing: boolean;
   editText: string;
   studentId: number | null;
-  groupId: number | null;
-  matchMethod?: 'student_id' | 'name' | 'none';
 }
 
 // ── Helper: extract student name from filename ───────────────────────
@@ -696,7 +691,6 @@ export function AssignmentView() {
   const { groups, fetchGroups } = useGroupStore();
   const { students, fetchStudents } = useStudentStore();
   const { addRecord } = useRecordStore();
-  const { settings } = useSettingsStore();
 
   // ── Folder state ────────────────────────────────────────────────
   const [folders, setFolders] = useState<AssignmentFolder[]>([]);
@@ -725,9 +719,6 @@ export function AssignmentView() {
   const [generating, setGenerating] = useState<boolean>(false);
   const [results, setResults] = useState<ResultItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  // ── Confirmed records history for this folder ───────────────────
-  const [folderRecords, setFolderRecords] = useState<SalpeemRecord[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -786,19 +777,12 @@ export function AssignmentView() {
     await loadFolders();
   };
 
-  const handleSelectFolder = async (folder: AssignmentFolder) => {
+  const handleSelectFolder = (folder: AssignmentFolder) => {
     setSelectedFolder(folder);
     setResults([]);
     setError(null);
     setUploadedFiles([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
-    // Load confirmed records for this folder
-    try {
-      const records = await getRecordsByAssignmentFolder(folder.id);
-      setFolderRecords(records);
-    } catch {
-      setFolderRecords([]);
-    }
   };
 
   const handleToggleExpand = (id: number) => {
@@ -853,19 +837,18 @@ export function AssignmentView() {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // ── Match student from filename (학번 우선 → 이름 폴백) ──────────
-  const findStudentFromFile = (filename: string) => {
-    return matchStudentFromFilename(filename, students, settings.student_id_pattern);
+  // ── Match student name from filename to existing students ────────
+  const findStudentId = (name: string): number | null => {
+    const match = students.find(
+      (s) => s.name === name || s.name.includes(name) || name.includes(s.name),
+    );
+    return match?.id ?? null;
   };
 
   // ── Save instructions only (no files required) ──────────────────
   const handleSave = async () => {
     if (!selectedFolder) return;
 
-    if (!selectedGroupId) {
-      alert('저장될 그룹(영역)을 선택해주세요.');
-      return;
-    }
     if (!taskDescription.trim()) {
       alert(isSurveyMode ? '설문 안내사항을 입력해주세요.' : '과제 안내사항을 입력해주세요.');
       return;
@@ -893,10 +876,6 @@ export function AssignmentView() {
   const handleGenerate = async () => {
     if (!selectedFolder) return;
 
-    if (!selectedGroupId) {
-      alert('저장될 그룹(영역)을 선택해주세요.');
-      return;
-    }
     if (!taskDescription.trim()) {
       alert(isSurveyMode ? '설문 안내사항을 입력해주세요.' : '과제 안내사항을 입력해주세요.');
       return;
@@ -952,27 +931,14 @@ export function AssignmentView() {
         generated = await generateAssignmentSentences(taskDescription, fileData);
       }
 
-      const resultItems: ResultItem[] = generated.map((g) => {
-        // Try matching by filename first (for assignment mode)
-        const fileMatch = uploadedFiles.find((f) => {
-          const name = f.name.replace(/\.[^.]+$/, '').replace(/^[\d_\-.\s]+/, '').trim();
-          return name === g.studentName || f.name.includes(g.studentName);
-        });
-        const match = fileMatch
-          ? findStudentFromFile(fileMatch.name)
-          : { student: students.find((s) => s.name === g.studentName) ?? null, matchMethod: 'name' as const };
-
-        return {
-          studentName: match.student?.name ?? g.studentName,
-          sentence: g.sentence,
-          confirmed: false,
-          editing: false,
-          editText: g.sentence,
-          studentId: match.student?.id ?? null,
-          groupId: selectedGroupId ? Number(selectedGroupId) : null,
-          matchMethod: match.matchMethod,
-        };
-      });
+      const resultItems: ResultItem[] = generated.map((g) => ({
+        studentName: g.studentName,
+        sentence: g.sentence,
+        confirmed: false,
+        editing: false,
+        editText: g.sentence,
+        studentId: findStudentId(g.studentName),
+      }));
 
       setResults(resultItems);
 
@@ -1022,7 +988,7 @@ export function AssignmentView() {
     if (item.confirmed) return;
 
     const source: RecordSource = isSurveyMode ? '설문' : '과제';
-    const catId = item.groupId ?? (selectedGroupId ? Number(selectedGroupId) : null);
+    const catId = selectedGroupId ? Number(selectedGroupId) : null;
 
     await addRecord(
       taskDescription,
@@ -1031,7 +997,6 @@ export function AssignmentView() {
       catId,
       source,
       '보통',
-      selectedFolder?.id ?? null,
     );
 
     setResults((prev) => prev.map((r, i) => (i === index ? { ...r, confirmed: true } : r)));
@@ -1039,13 +1004,13 @@ export function AssignmentView() {
 
   const confirmAll = async () => {
     const source: RecordSource = isSurveyMode ? '설문' : '과제';
+    const catId = selectedGroupId ? Number(selectedGroupId) : null;
 
     const unconfirmed = results
       .map((r, i) => ({ ...r, index: i }))
       .filter((r) => !r.confirmed);
 
     for (const item of unconfirmed) {
-      const catId = item.groupId ?? (selectedGroupId ? Number(selectedGroupId) : null);
       await addRecord(
         taskDescription,
         item.sentence,
@@ -1053,7 +1018,6 @@ export function AssignmentView() {
         catId,
         source,
         '보통',
-        selectedFolder?.id ?? null,
       );
     }
 
@@ -1202,7 +1166,7 @@ export function AssignmentView() {
                   생성 결과 ({results.length}명)
                 </div>
                 <div style={{ fontSize: '13px', color: '#555555', marginTop: '4px' }}>
-                  {results.filter((r) => r.confirmed).length}/{results.length}명 전송됨
+                  {results.filter((r) => r.confirmed).length}/{results.length}명 확정됨
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '12px' }}>
@@ -1217,7 +1181,7 @@ export function AssignmentView() {
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#333333')}
                     onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#111111')}
                   >
-                    전체 전송
+                    전체 확정
                   </button>
                 )}
                 <button
@@ -1268,11 +1232,11 @@ export function AssignmentView() {
                     alignItems: 'center',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '15px', fontWeight: 700, color: '#111111' }}>
                       {item.studentName}
                     </span>
-                    {item.studentId ? (
+                    {item.studentId && (
                       <span
                         style={{
                           fontSize: '11px',
@@ -1283,84 +1247,22 @@ export function AssignmentView() {
                           fontWeight: 600,
                         }}
                       >
-                        {item.matchMethod === 'student_id' ? '학번 매칭' : '이름 매칭'}
+                        매칭됨
                       </span>
-                    ) : (
-                      <>
-                        <span
-                          style={{
-                            fontSize: '11px',
-                            color: '#D97706',
-                            backgroundColor: '#FEF3C7',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontWeight: 600,
-                          }}
-                        >
-                          매칭 안됨
-                        </span>
-                        {!item.confirmed && (
-                          <select
-                            style={{
-                              fontSize: '12px',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              border: '1px solid #D97706',
-                              backgroundColor: '#FFFBEB',
-                              color: '#92400E',
-                              cursor: 'pointer',
-                            }}
-                            value=""
-                            onChange={(e) => {
-                              const sid = Number(e.target.value);
-                              const s = students.find((st) => st.id === sid);
-                              if (s) {
-                                setResults((prev) =>
-                                  prev.map((r, i) =>
-                                    i === index
-                                      ? { ...r, studentId: sid, studentName: s.name, matchMethod: 'name' }
-                                      : r,
-                                  ),
-                                );
-                              }
-                            }}
-                          >
-                            <option value="" disabled>학생 직접 선택</option>
-                            {students.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.grade} {s.class_name} {s.student_no}번 {s.name}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </>
                     )}
-                    {/* 그룹 변경 드롭다운 */}
-                    {!item.confirmed && (
-                      <select
+                    {!item.studentId && (
+                      <span
                         style={{
-                          fontSize: '12px',
-                          padding: '2px 6px',
+                          fontSize: '11px',
+                          color: '#D97706',
+                          backgroundColor: '#FEF3C7',
+                          padding: '2px 8px',
                           borderRadius: '4px',
-                          border: '1px solid rgba(0,0,0,0.15)',
-                          backgroundColor: '#F9FAFB',
-                          color: '#374151',
-                          cursor: 'pointer',
-                        }}
-                        value={String(item.groupId ?? selectedGroupId)}
-                        onChange={(e) => {
-                          const gid = Number(e.target.value);
-                          setResults((prev) =>
-                            prev.map((r, i) => (i === index ? { ...r, groupId: gid } : r)),
-                          );
+                          fontWeight: 600,
                         }}
                       >
-                        {groups.map((g) => (
-                          <option key={g.id} value={String(g.id)}>
-                            {g.name}
-                          </option>
-                        ))}
-                      </select>
+                        미매칭
+                      </span>
                     )}
                   </div>
                   {item.confirmed && (
@@ -1371,7 +1273,7 @@ export function AssignmentView() {
                         color: '#065F46',
                       }}
                     >
-                      전송됨
+                      확정됨
                     </span>
                   )}
                 </div>
@@ -1473,7 +1375,7 @@ export function AssignmentView() {
                               'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
                           }}
                         >
-                          전송
+                          확정
                         </button>
                       </>
                     )}
@@ -1531,7 +1433,7 @@ export function AssignmentView() {
               <label style={customStyles.formLabel}>
                 {isSurveyMode ? '학생 응답' : '학생 제출물'}
                 <span style={customStyles.labelNote}>
-                  파일명에 학번 또는 이름을 포함하면 자동 매칭됩니다.
+                  파일명에 학생 이름을 포함하면 자동 매칭됩니다.
                 </span>
               </label>
               <label
@@ -1688,45 +1590,6 @@ export function AssignmentView() {
               >
                 저장
               </button>
-            </div>
-          </div>
-        )}
-
-        {/* 확정된 문장 히스토리 */}
-        {folderRecords.length > 0 && (
-          <div style={{ marginTop: '32px' }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: '#111111', marginBottom: '12px' }}>
-              전송된 문장 ({folderRecords.length}건)
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {folderRecords.map((rec) => (
-                <div
-                  key={rec.id}
-                  style={{
-                    border: '1px solid rgba(0,0,0,0.1)',
-                    borderRadius: '8px',
-                    backgroundColor: '#F9FAFB',
-                    padding: '12px 16px',
-                    fontSize: '14px',
-                    lineHeight: 1.6,
-                  }}
-                >
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 600, color: '#111111' }}>
-                      {rec.student_name || '미지정'}
-                    </span>
-                    {rec.group_name && (
-                      <span style={{ fontSize: '11px', color: '#6B7280', backgroundColor: '#E5E7EB', padding: '1px 6px', borderRadius: '3px' }}>
-                        {rec.group_name}
-                      </span>
-                    )}
-                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                      {rec.source}
-                    </span>
-                  </div>
-                  <div style={{ color: '#374151' }}>{rec.generated_sentence}</div>
-                </div>
-              ))}
             </div>
           </div>
         )}

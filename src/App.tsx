@@ -6,7 +6,7 @@ import { CompletionView } from './views/CompletionView';
 import { AreaDetailView } from './views/AreaDetailView';
 import { SettingsView } from './views/SettingsView';
 import { Onboarding } from './components/shared/Onboarding';
-import { initDatabase, getSetting, setSetting, seedTestStudents } from './lib/database';
+import { initDatabase, getSetting, setSetting } from './lib/database';
 import { useStudentStore } from './stores/useStudentStore';
 import { useGroupStore } from './stores/useGroupStore';
 import { useSettingsStore } from './stores/useSettingsStore';
@@ -189,7 +189,6 @@ function App() {
     async function init() {
       try {
         await initDatabase();
-        await seedTestStudents();
         await Promise.all([fetchStudents(), fetchGroups(), fetchSettings()]);
         const onboardingCompleted = await getSetting('onboarding_completed');
         if (onboardingCompleted !== 'true') {
