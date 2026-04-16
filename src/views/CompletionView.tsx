@@ -594,7 +594,7 @@ function buildGradeTree(students: Student[]): GradeGroup[] {
 
 export function CompletionView({ onStudentClick }: CompletionViewProps) {
   const { students, fetchStudents } = useStudentStore();
-  const { groups, fetchGroups } = useGroupStore();
+  const { groups, groupTree, fetchGroups } = useGroupStore();
   const {
     completedRecords,
     fetchCompletedRecords,
@@ -760,10 +760,26 @@ export function CompletionView({ onStudentClick }: CompletionViewProps) {
     setSelectedStudentIds(next);
   }
 
+  // 그룹 및 모든 하위 그룹 ID 수집
+  function collectGroupIds(id: number): number[] {
+    const ids = [id];
+    const children = groups.filter((g) => g.parent_id === id);
+    for (const child of children) {
+      ids.push(...collectGroupIds(child.id));
+    }
+    return ids;
+  }
+
   function toggleGroup(id: number) {
     const next = new Set(selectedGroupIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    const allIds = collectGroupIds(id);
+    if (next.has(id)) {
+      // 자신과 모든 자식 해제
+      for (const gid of allIds) next.delete(gid);
+    } else {
+      // 자신과 모든 자식 선택
+      for (const gid of allIds) next.add(gid);
+    }
     setSelectedGroupIds(next);
   }
 
@@ -838,7 +854,12 @@ export function CompletionView({ onStudentClick }: CompletionViewProps) {
     const pairs: { studentId: number; groupId: number }[] = [];
     for (const sid of selectedStudentIds) {
       for (const cid of selectedGroupIds) {
-        pairs.push({ studentId: sid, groupId: cid });
+        // records가 있는 조합만 생성 (빈 조합 스킵)
+        const key = `${sid}-${cid}`;
+        const count = sentenceCounts.get(key) ?? 0;
+        if (count > 0) {
+          pairs.push({ studentId: sid, groupId: cid });
+        }
       }
     }
     if (pairs.length === 0) return;
@@ -969,18 +990,24 @@ export function CompletionView({ onStudentClick }: CompletionViewProps) {
 
         <div style={customStyles.sidebarDivider}></div>
 
-        {/* Group Section */}
+        {/* Group Section (Tree) */}
         <div style={customStyles.sidebarSection}>
           <div style={customStyles.sidebarHeader}>그룹</div>
           <div style={customStyles.checkboxList}>
-            {groups.map((g) => (
-              <CustomCheckbox
-                key={g.id}
-                checked={selectedGroupIds.has(g.id)}
-                onChange={() => toggleGroup(g.id)}
-                label={g.name}
-              />
-            ))}
+            {(function renderGroupTree(nodes: typeof groupTree, depth = 0): React.ReactNode {
+              return nodes.map((g) => (
+                <React.Fragment key={g.id}>
+                  <div style={{ paddingLeft: `${depth * 16}px` }}>
+                    <CustomCheckbox
+                      checked={selectedGroupIds.has(g.id)}
+                      onChange={() => toggleGroup(g.id)}
+                      label={g.name}
+                    />
+                  </div>
+                  {g.children && g.children.length > 0 && renderGroupTree(g.children, depth + 1)}
+                </React.Fragment>
+              ));
+            })(groupTree)}
           </div>
         </div>
       </div>
