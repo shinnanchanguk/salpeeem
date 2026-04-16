@@ -1298,26 +1298,28 @@ export function RecordView() {
           <div style={customStyles.quickInputZone} data-tour="quick-input">
             <div style={{ ...customStyles.inputWrapper, position: 'relative' }}>
               <div style={{ position: 'relative', flex: 1 }}>
-                {/* Visible text layer with highlights */}
-                <div
-                  ref={highlightRef}
-                  aria-hidden="true"
-                  style={{
-                    ...customStyles.quickTextarea,
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    minHeight: 'unset',
-                    pointerEvents: 'none',
-                    color: '#111111',
-                    whiteSpace: 'pre-wrap',
-                    wordWrap: 'break-word',
-                    overflow: 'hidden',
-                  }}
-                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(inputText) }}
-                />
+                {/* Visible text layer with highlights (hidden when empty so placeholder shows cleanly) */}
+                {inputText && (
+                  <div
+                    ref={highlightRef}
+                    aria-hidden="true"
+                    style={{
+                      ...customStyles.quickTextarea,
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      minHeight: 'unset',
+                      pointerEvents: 'none',
+                      color: '#111111',
+                      whiteSpace: 'pre-wrap',
+                      wordWrap: 'break-word',
+                      overflow: 'hidden',
+                    }}
+                    dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(inputText) }}
+                  />
+                )}
                 {/* Invisible textarea for input handling */}
                 <textarea
                   ref={textareaRef}
