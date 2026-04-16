@@ -4,6 +4,7 @@ import { useStudentStore } from '@/stores/useStudentStore';
 import { useGroupStore } from '@/stores/useGroupStore';
 import { convertToFormalSentence } from '@/lib/ai-service';
 import type { Record as RecordType, Student, Group } from '@/types';
+import { getByteLength } from '@/types';
 
 // ── Helper: build highlighted HTML from input text ──
 
@@ -854,7 +855,12 @@ const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssig
         <div style={customStyles.transformIcon}>
           <ArrowRightIcon />
         </div>
-        <div style={customStyles.formalText}>{record.generated_sentence}</div>
+        <div style={customStyles.formalText}>
+          {record.generated_sentence}
+          <span style={{ color: '#999', fontSize: '12px', marginLeft: '6px', whiteSpace: 'nowrap' }}>
+            {getByteLength(record.generated_sentence)}B
+          </span>
+        </div>
       </div>
       <div style={customStyles.itemActions}>
         <button
@@ -897,7 +903,12 @@ const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, stude
         <div style={customStyles.transformIcon}>
           <ArrowRightIcon />
         </div>
-        <div style={customStyles.formalText}>{record.generated_sentence}</div>
+        <div style={customStyles.formalText}>
+          {record.generated_sentence}
+          <span style={{ color: '#999', fontSize: '12px', marginLeft: '6px', whiteSpace: 'nowrap' }}>
+            {getByteLength(record.generated_sentence)}B
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -1125,6 +1136,10 @@ export function RecordView() {
     }
   }, [selectedGroupId, fetchGroupRecords]);
 
+  // Conversion note (shown transiently after AI returns a note)
+  const [conversionNote, setConversionNote] = useState<string | null>(null);
+  const noteTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
   // Submit quick record
   const handleSubmit = async () => {
     const text = inputText.trim();
@@ -1136,9 +1151,16 @@ export function RecordView() {
 
     setAiLoading(true);
     setInputText('');
+    setConversionNote(null);
     try {
-      const formalSentence = await convertToFormalSentence(text);
-      await addRecord(text, formalSentence, studentId, finalGroupId, '기록', '보통');
+      const result = await convertToFormalSentence(text);
+      await addRecord(text, result.sentence, studentId, finalGroupId, '기록', '보통');
+      // Show note if AI returned one
+      if (result.note) {
+        setConversionNote(result.note);
+        if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
+        noteTimerRef.current = setTimeout(() => setConversionNote(null), 8000);
+      }
       // Refresh appropriate list
       if (finalGroupId === null) {
         await fetchInboxRecords();
@@ -1433,6 +1455,43 @@ export function RecordView() {
               </button>
             </div>
           </div>
+
+          {/* Conversion Note */}
+          {conversionNote && (
+            <div
+              style={{
+                margin: '0 16px',
+                padding: '10px 14px',
+                background: '#FFF7ED',
+                border: '1px solid #FDBA74',
+                borderRadius: '8px',
+                fontSize: '13px',
+                color: '#9A3412',
+                lineHeight: 1.5,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '8px',
+              }}
+            >
+              <span>{conversionNote}</span>
+              <button
+                onClick={() => setConversionNote(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#9A3412',
+                  fontSize: '16px',
+                  lineHeight: 1,
+                  flexShrink: 0,
+                  padding: 0,
+                }}
+              >
+                &times;
+              </button>
+            </div>
+          )}
 
           {/* List Zone */}
           <div style={customStyles.listZone}>

@@ -493,7 +493,7 @@ function BarModeView({
 
       let generated = '';
       try {
-        generated = await convertToFormalSentence(cleanText);
+        generated = (await convertToFormalSentence(cleanText)).sentence;
       } catch {
         generated = cleanText;
       }
@@ -645,7 +645,7 @@ function SideModeView({
 
       let generated = '';
       try {
-        generated = await convertToFormalSentence(cleanText);
+        generated = (await convertToFormalSentence(cleanText)).sentence;
       } catch {
         generated = cleanText;
       }

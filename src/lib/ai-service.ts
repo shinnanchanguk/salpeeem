@@ -187,10 +187,18 @@ const SEUNGGIBOO_RULES = `
 
 // ── public API ──
 
+/** convertToFormalSentence 반환 타입 */
+export interface ConversionResult {
+  sentence: string;
+  note?: string;
+}
+
 /**
  * Convert a raw classroom observation into a formal 생기부 sentence.
+ * If the AI judges the input as not a meaningful classroom observation,
+ * it returns the original text as-is with a note explaining why.
  */
-export async function convertToFormalSentence(rawInput: string): Promise<string> {
+export async function convertToFormalSentence(rawInput: string): Promise<ConversionResult> {
   const cleaned = stripTags(rawInput);
 
   const systemPrompt =
@@ -198,22 +206,41 @@ export async function convertToFormalSentence(rawInput: string): Promise<string>
     '교사가 수업 중 관찰한 내용을 생활기록부에 적합한 공식적인 문장으로 변환해주세요.\n\n' +
     SEUNGGIBOO_RULES + '\n\n' +
     '## 변환 예시 (before → after)\n' +
-    '- "다율이가 OD600으로 성장곡선 분석하면서 순간변화율이랑 평균변화율 차이를 엄청 잘 설명했음" → "세포 생장 곡선 분석 활동에서 광학밀도 측정값을 시간에 따른 함수로 나타내고 평균변화율과 순간변화율의 의미 차이를 분석하여 설명함."\n' +
-    '- "대원이 AWS 서버 스케일링 문제 만들었는데 꽤 괜찮았어요" → "서버 시스템의 오토스케일링에서 순간변화율이 적용되는 사례를 탐구하고 문제를 설계함."\n' +
-    '- "준희가 chatgpt transformer 관련해서 arctan 활용한 문제 냄" → "생성형 인공지능의 작동 원리에서 역탄젠트 함수를 활용하여 트랜스포머 모델의 특성을 반영한 문제를 설계함."\n' +
+    '- "광학밀도로 성장곡선 분석하면서 순간변화율이랑 평균변화율 차이를 엄청 잘 설명했음" → "세포 생장 곡선 분석 활동에서 광학밀도 측정값을 시간에 따른 함수로 나타내고 평균변화율과 순간변화율의 의미 차이를 분석하여 설명함."\n' +
+    '- "서버 스케일링 문제 만들었는데 꽤 괜찮았어요" → "서버 시스템의 오토스케일링에서 순간변화율이 적용되는 사례를 탐구하고 문제를 설계함."\n' +
+    '- "transformer 관련해서 arctan 활용한 문제 냄" → "생성형 인공지능의 작동 원리에서 역탄젠트 함수를 활용하여 트랜스포머 모델의 특성을 반영한 문제를 설계함."\n' +
     '- "수업시간에 발표를 잘 못하고 소극적이었음" → "발표에 적극적으로 참여한다면 더욱 성장할 것으로 기대됨."\n\n' +
+    '## 핵심 제약 (절대 준수)\n' +
+    '- 입력에 포함된 사실만 변환하세요. 입력에 없는 활동, 내용, 맥락을 절대 추가하지 마세요.\n' +
+    '- 입력이 교실 관찰 기록으로서 의미가 없다고 판단되면 (예: 무의미한 문자열, 테스트 입력 등), 원문을 그대로 두고 이유를 설명하세요.\n\n' +
+    '## 응답 형식\n' +
+    '반드시 아래 JSON 형식으로만 응답하세요. JSON 외의 텍스트를 출력하지 마세요.\n' +
+    '- 정상 변환: {"sentence": "변환된 문장", "note": null}\n' +
+    '- 의미 없는 입력: {"sentence": "원문 그대로", "note": "의미 없다고 판단한 이유"}\n\n' +
     '## 추가 지침\n' +
     '- 오타와 줄임말은 자연스럽게 교정합니다.\n' +
     '- 학생의 긍정적인 면을 부각하되 사실에 기반한 표현을 사용하세요.\n' +
-    '- 한 문장에서 세 문장 이내로 작성하세요.\n' +
-    '- 변환된 문장만 출력하세요.';
+    '- 한 문장에서 세 문장 이내로 작성하세요.';
 
-  const result = await callOpenRouter([
+  const raw = await callOpenRouter([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: cleaned },
   ]);
 
-  return result;
+  // JSON 파싱 시도, 실패하면 기존 방식으로 폴백
+  try {
+    const trimmed = raw.replace(/^```json?\s*/, '').replace(/\s*```$/, '').trim();
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed.sentence === 'string') {
+      return {
+        sentence: parsed.sentence,
+        note: typeof parsed.note === 'string' ? parsed.note : undefined,
+      };
+    }
+  } catch {
+    // JSON 파싱 실패 — 일반 텍스트 응답으로 처리
+  }
+  return { sentence: raw };
 }
 
 /**
