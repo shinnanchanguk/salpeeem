@@ -755,6 +755,26 @@ interface AssignDialogProps {
 const AssignDialog: React.FC<AssignDialogProps> = ({ students, groups, onConfirm, onClose }) => {
   const [selectedStudent, setSelectedStudent] = useState<number>(0);
   const [selectedGroup, setSelectedGroup] = useState<number>(0);
+  const [studentQuery, setStudentQuery] = useState('');
+  const [studentDropdownOpen, setStudentDropdownOpen] = useState(false);
+  const [highlightIdx, setHighlightIdx] = useState(-1);
+  const studentInputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const filteredStudents = studentQuery.trim()
+    ? students.filter((s) => {
+        const q = studentQuery.trim().toLowerCase();
+        const label = `${s.grade} ${s.class_name} ${s.student_no ?? ''}번 ${s.name}`.toLowerCase();
+        return label.includes(q) || s.name.toLowerCase().includes(q);
+      })
+    : students;
+
+  const selectedStudentLabel = selectedStudent
+    ? (() => {
+        const s = students.find((s) => s.id === selectedStudent);
+        return s ? `${s.grade} ${s.class_name} ${s.student_no ?? ''}번 ${s.name}` : '';
+      })()
+    : '';
 
   const renderGroupOptions = (groups: Group[], depth: number = 0): React.ReactNode[] => {
     const options: React.ReactNode[] = [];
@@ -777,20 +797,114 @@ const AssignDialog: React.FC<AssignDialogProps> = ({ students, groups, onConfirm
       <div style={customStyles.dialog} onClick={(e) => e.stopPropagation()}>
         <div style={customStyles.dialogTitle}>학생·그룹 지정</div>
 
-        <div>
+        <div style={{ position: 'relative' }}>
           <div style={customStyles.dialogLabel}>학생</div>
-          <select
-            style={customStyles.dialogSelect}
-            value={selectedStudent}
-            onChange={(e) => setSelectedStudent(Number(e.target.value))}
-          >
-            <option value={0}>선택하세요</option>
-            {students.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.grade} {s.class_name} {s.student_no}번 {s.name}
-              </option>
-            ))}
-          </select>
+          <input
+            ref={studentInputRef}
+            type="text"
+            placeholder={selectedStudent ? selectedStudentLabel : '이름으로 검색...'}
+            value={studentQuery}
+            onChange={(e) => {
+              setStudentQuery(e.target.value);
+              setStudentDropdownOpen(true);
+              setHighlightIdx(0);
+              if (!e.target.value.trim()) setSelectedStudent(0);
+            }}
+            onFocus={() => { setStudentDropdownOpen(true); setHighlightIdx(selectedStudent ? filteredStudents.findIndex((s) => s.id === selectedStudent) : 0); }}
+            onBlur={() => setTimeout(() => setStudentDropdownOpen(false), 150)}
+            onKeyDown={(e) => {
+              if (!studentDropdownOpen || filteredStudents.length === 0) return;
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setHighlightIdx((prev) => {
+                  const next = (prev + 1) % filteredStudents.length;
+                  dropdownRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
+                  return next;
+                });
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setHighlightIdx((prev) => {
+                  const next = (prev - 1 + filteredStudents.length) % filteredStudents.length;
+                  dropdownRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
+                  return next;
+                });
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const target = filteredStudents[highlightIdx >= 0 ? highlightIdx : 0];
+                if (target) {
+                  setSelectedStudent(target.id);
+                  setStudentQuery('');
+                  setStudentDropdownOpen(false);
+                }
+              } else if (e.key === 'Escape') {
+                setStudentDropdownOpen(false);
+              }
+            }}
+            style={{
+              ...customStyles.dialogSelect,
+              color: selectedStudent && !studentQuery ? '#111' : undefined,
+            }}
+          />
+          {studentDropdownOpen && filteredStudents.length > 0 && (
+            <div
+              ref={dropdownRef}
+              style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                maxHeight: '200px',
+                overflowY: 'auto',
+                background: '#fff',
+                border: '1px solid #000',
+                borderRadius: '6px',
+                marginTop: '4px',
+                zIndex: 10,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              }}
+            >
+              {filteredStudents.map((s, idx) => (
+                <div
+                  key={s.id}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setSelectedStudent(s.id);
+                    setStudentQuery('');
+                    setStudentDropdownOpen(false);
+                  }}
+                  onMouseEnter={() => setHighlightIdx(idx)}
+                  style={{
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    background: idx === highlightIdx ? 'rgba(0,0,0,0.08)' : 'transparent',
+                  }}
+                >
+                  {s.grade} {s.class_name} {s.student_no ?? ''}번 {s.name}
+                </div>
+              ))}
+            </div>
+          )}
+          {studentDropdownOpen && filteredStudents.length === 0 && studentQuery.trim() && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                background: '#fff',
+                border: '1px solid #000',
+                borderRadius: '6px',
+                marginTop: '4px',
+                padding: '12px',
+                fontSize: '13px',
+                color: '#999',
+                zIndex: 10,
+              }}
+            >
+              일치하는 학생이 없습니다
+            </div>
+          )}
         </div>
 
         <div>
@@ -1091,12 +1205,20 @@ const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssig
 interface RecordItemComponentProps {
   record: RecordType;
   students: Student[];
+  groups: Group[];
   onUpdateText: (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => Promise<void>;
 }
 
-const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students, onUpdateText }) => {
+const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students, groups, onUpdateText }) => {
   const studentName = record.student_name ?? students.find((s) => s.id === record.student_id)?.name ?? '미지정';
-  const groupName = record.group_name ?? '미지정';
+  const findGroup = (gs: Group[], id: number): string | undefined => {
+    for (const g of gs) {
+      if (g.id === id) return g.name;
+      if (g.children) { const found = findGroup(g.children, id); if (found) return found; }
+    }
+    return undefined;
+  };
+  const groupName = record.group_name ?? (record.group_id ? findGroup(groups, record.group_id) : undefined) ?? '미지정';
   const [reconverting, setReconverting] = useState(false);
   const cleaned = record.raw_input.replace(/@\S+/g, '').replace(/\/\S+/g, '').trim();
   const isPassthrough = record.generated_sentence === cleaned || record.generated_sentence === record.raw_input;
@@ -1759,6 +1881,7 @@ export function RecordView() {
                       key={record.id}
                       record={record}
                       students={students}
+                      groups={groupTree}
                       onUpdateText={handleUpdateRecordText}
                     />
                   ),
