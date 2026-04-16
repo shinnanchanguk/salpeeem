@@ -33,6 +33,7 @@ export interface Record {
   group_id: number | null;
   source: RecordSource;
   importance: Importance;
+  assignment_folder_id: number | null;
   created_at: string;
   /** Joined fields (optional) */
   student_name?: string;
@@ -89,6 +90,9 @@ export interface AssignmentFolder {
   children?: AssignmentFolder[];
 }
 
+/** 학번 패턴 — G=학년자릿수, C=반자릿수, N=번호자릿수 */
+export type StudentIdPattern = 'G1C1N2' | 'G1C2N2';
+
 /** 앱 설정 */
 export interface AppSettings {
   openrouter_api_key: string;
@@ -98,16 +102,40 @@ export interface AppSettings {
   shortcut_side: string;
   shortcut_bar: string;
   shortcut_focus: string;
+  student_id_pattern: StudentIdPattern;
 }
 
-/** 바이트 계산 (한글 = 3바이트) */
+/** 바이트 계산 — 나이스(NEIS) 기준
+ *  영문/숫자/특수문자/공백 = 1바이트, 엔터(\n) = 2바이트, 한글 = 3바이트
+ *  참고: https://hjh010501.github.io/neis-counter/ */
 export function getByteLength(str: string): number {
-  let len = 0;
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    if (code <= 0x7f) len += 1;
-    else if (code <= 0x7ff) len += 2;
-    else len += 3;
+  // NEIS 카운터와 동일하게 마지막 줄바꿈 제거
+  let s = str;
+  if (s !== '\n' && s.endsWith('\n')) {
+    s = s.slice(0, -1);
   }
-  return len;
+  let bytes = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    const code = s.charCodeAt(i);
+    if (c === '\n') {
+      bytes += 2;
+    } else if (c === '\r') {
+      // \r은 카운트하지 않음 (textarea에서 \n만 사용)
+      continue;
+    } else if (code <= 0x7f) {
+      // ASCII: 영문, 숫자, 특수문자, 공백, 탭 등
+      bytes += 1;
+    } else if (
+      (code >= 0x3131 && code <= 0x318e) || // ㄱ-ㅎ, ㅏ-ㅣ
+      (code >= 0xac00 && code <= 0xd7a3)    // 가-힣
+    ) {
+      bytes += 3;
+    } else {
+      // 기타 유니코드 (수학기호, 그리스문자, 중점·, 따옴표 등)
+      // NEIS 카운터는 이들을 1바이트로 계산
+      bytes += 1;
+    }
+  }
+  return bytes;
 }
