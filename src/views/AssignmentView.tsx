@@ -17,7 +17,7 @@ import type { AssignmentFolder, RecordSource } from '@/types';
 // ── Styles (kept from original) ────────────────────────────────────
 const customStyles: Record<string, React.CSSProperties> = {
   sidebar: {
-    width: '300px',
+    width: '280px',
     display: 'flex',
     flexDirection: 'column',
     borderRight: '1px solid #000000',
@@ -29,24 +29,6 @@ const customStyles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: '12px',
-  },
-  btnSidebarAction: {
-    padding: '12px 16px',
-    borderRadius: '8px',
-    border: '1px solid #000000',
-    background: 'transparent',
-    fontSize: '14px',
-    fontWeight: 600,
-    color: '#111111',
-    cursor: 'pointer',
-    textAlign: 'center',
-    transition: 'all 0.2s',
-    fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
-  },
-  btnSidebarActionSelected: {
-    backgroundColor: '#111111',
-    color: '#ffffff',
-    borderColor: '#111111',
   },
   sidebarDivider: {
     height: '1px',
@@ -190,6 +172,110 @@ const customStyles: Record<string, React.CSSProperties> = {
     transition: 'background-color 0.2s',
     fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
   },
+  btnNewView: {
+    padding: '16px 20px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+    color: '#555555',
+    cursor: 'pointer',
+    transition: 'color 0.2s',
+    background: 'transparent',
+    border: 'none',
+    borderTop: '1px solid rgba(0,0,0,0.1)',
+    width: '100%',
+    textAlign: 'left' as const,
+    fontFamily: 'inherit',
+  },
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  },
+  dialog: {
+    backgroundColor: '#F4F4F2',
+    border: '1px solid #000000',
+    borderRadius: '12px',
+    padding: '32px',
+    width: '480px',
+    maxHeight: '80vh',
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '20px',
+  },
+  dialogTitle: {
+    fontSize: '20px',
+    fontWeight: 700,
+    letterSpacing: '-0.02em',
+    color: '#111111',
+  },
+  dialogLabel: {
+    fontSize: '13px',
+    fontWeight: 600,
+    color: '#555555',
+    marginBottom: '6px',
+  },
+  dialogInput: {
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #000000',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontFamily: 'inherit',
+    backgroundColor: '#ffffff',
+    color: '#111111',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  dialogSelect: {
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #000000',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontFamily: 'inherit',
+    backgroundColor: '#ffffff',
+    color: '#111111',
+    outline: 'none',
+  },
+  dialogActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '12px',
+    paddingTop: '12px',
+    borderTop: '1px solid rgba(0,0,0,0.1)',
+  },
+  btnCancel: {
+    background: 'transparent',
+    border: '1px solid rgba(0,0,0,0.2)',
+    color: '#555555',
+    padding: '8px 20px',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  btnConfirm: {
+    backgroundColor: '#111111',
+    color: '#ffffff',
+    border: 'none',
+    padding: '8px 20px',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
 };
 
 // ── Result item types ────────────────────────────────────────────────
@@ -234,6 +320,22 @@ function buildFolderTree(folders: AssignmentFolder[]): AssignmentFolder[] {
 
   return roots;
 }
+
+// ── Icons ────────────────────────────────────────────────────────────
+const PlusIcon: React.FC = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
+const MoreIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="12" cy="5" r="1.5" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+    <circle cx="12" cy="19" r="1.5" fill="currentColor" />
+  </svg>
+);
 
 // ── Folder tree item component ───────────────────────────────────────
 interface FolderTreeItemProps {
