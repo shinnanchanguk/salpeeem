@@ -400,6 +400,12 @@ const MoreIcon: React.FC = () => (
   </svg>
 );
 
+const CloseIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 const InboxIcon: React.FC = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
     <path d="M22 12H16L14 15H10L8 12H2" strokeLinecap="round" strokeLinejoin="round" />
@@ -802,15 +808,15 @@ const AssignDialog: React.FC<AssignDialogProps> = ({ students, groups, onConfirm
           <input
             ref={studentInputRef}
             type="text"
-            placeholder={selectedStudent ? selectedStudentLabel : '이름으로 검색...'}
-            value={studentQuery}
+            placeholder="이름으로 검색..."
+            value={studentQuery || (selectedStudent ? selectedStudentLabel : '')}
             onChange={(e) => {
               setStudentQuery(e.target.value);
               setStudentDropdownOpen(true);
               setHighlightIdx(0);
               if (!e.target.value.trim()) setSelectedStudent(0);
             }}
-            onFocus={() => { setStudentDropdownOpen(true); setHighlightIdx(selectedStudent ? filteredStudents.findIndex((s) => s.id === selectedStudent) : 0); }}
+            onFocus={() => { setStudentQuery(''); setStudentDropdownOpen(true); setHighlightIdx(selectedStudent ? filteredStudents.findIndex((s) => s.id === selectedStudent) : 0); }}
             onBlur={() => setTimeout(() => setStudentDropdownOpen(false), 150)}
             onKeyDown={(e) => {
               if (!studentDropdownOpen || filteredStudents.length === 0) return;
@@ -1124,10 +1130,11 @@ const EditableText: React.FC<EditableTextProps> = ({ value, onSave, saving, styl
 interface InboxItemComponentProps {
   record: RecordType;
   onAssign: (id: number) => void;
+  onDelete: (id: number) => void;
   onUpdateText: (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => Promise<void>;
 }
 
-const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssign, onUpdateText }) => {
+const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssign, onDelete, onUpdateText }) => {
   const [assignHover, setAssignHover] = useState(false);
   const [reconverting, setReconverting] = useState(false);
   const cleaned = record.raw_input.replace(/@\S+/g, '').replace(/\/\S+/g, '').trim();
@@ -1150,7 +1157,30 @@ const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssig
   };
 
   return (
-    <div style={customStyles.inboxItem}>
+    <div style={{ ...customStyles.inboxItem, position: 'relative' }}>
+      <button
+        onClick={() => onDelete(record.id)}
+        title="기록 삭제"
+        style={{
+          position: 'absolute',
+          top: '12px',
+          right: '12px',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          color: '#999999',
+          padding: '4px',
+          borderRadius: '4px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'color 0.15s, background 0.15s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = '#cc3333'; e.currentTarget.style.background = 'rgba(204,51,51,0.08)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = '#999999'; e.currentTarget.style.background = 'transparent'; }}
+      >
+        <CloseIcon />
+      </button>
       <div style={customStyles.itemMeta}>
         <span>{formatTime(record.created_at)}</span>
         <span style={customStyles.badgeSource}>{record.source}</span>
@@ -1206,10 +1236,11 @@ interface RecordItemComponentProps {
   record: RecordType;
   students: Student[];
   groups: Group[];
+  onDelete: (id: number) => void;
   onUpdateText: (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => Promise<void>;
 }
 
-const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students, groups, onUpdateText }) => {
+const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students, groups, onDelete, onUpdateText }) => {
   const studentName = record.student_name ?? students.find((s) => s.id === record.student_id)?.name ?? '미지정';
   const findGroup = (gs: Group[], id: number): string | undefined => {
     for (const g of gs) {
@@ -1240,7 +1271,30 @@ const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, stude
   };
 
   return (
-    <div style={customStyles.inboxItem}>
+    <div style={{ ...customStyles.inboxItem, position: 'relative' }}>
+      <button
+        onClick={() => onDelete(record.id)}
+        title="기록 삭제"
+        style={{
+          position: 'absolute',
+          top: '12px',
+          right: '12px',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          color: '#999999',
+          padding: '4px',
+          borderRadius: '4px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'color 0.15s, background 0.15s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = '#cc3333'; e.currentTarget.style.background = 'rgba(204,51,51,0.08)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = '#999999'; e.currentTarget.style.background = 'transparent'; }}
+      >
+        <CloseIcon />
+      </button>
       <div style={customStyles.itemMeta}>
         <span>{formatTime(record.created_at)}</span>
         <span style={customStyles.badgeSource}>{record.source}</span>
@@ -1291,6 +1345,7 @@ export function RecordView() {
     addRecord,
     assignRecord,
     updateRecordText,
+    deleteRecord,
   } = useRecordStore();
   const { students, fetchStudents } = useStudentStore();
   const {
@@ -1612,6 +1667,15 @@ export function RecordView() {
     }
   };
 
+  const handleDeleteRecord = async (id: number) => {
+    if (confirm('이 기록을 삭제할까요?')) {
+      await deleteRecord(id);
+      if (selectedGroupId !== null) {
+        await fetchGroupRecords(selectedGroupId);
+      }
+    }
+  };
+
   const isInbox = selectedGroupId === null;
   const displayRecords = isInbox ? inboxRecords : groupRecords;
   const selectedGroupName = isInbox
@@ -1874,6 +1938,7 @@ export function RecordView() {
                       key={record.id}
                       record={record}
                       onAssign={(id) => setAssigningRecordId(id)}
+                      onDelete={handleDeleteRecord}
                       onUpdateText={handleUpdateRecordText}
                     />
                   ) : (
@@ -1882,6 +1947,7 @@ export function RecordView() {
                       record={record}
                       students={students}
                       groups={groupTree}
+                      onDelete={handleDeleteRecord}
                       onUpdateText={handleUpdateRecordText}
                     />
                   ),
