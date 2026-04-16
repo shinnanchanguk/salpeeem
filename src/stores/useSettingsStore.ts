@@ -11,6 +11,7 @@ const defaultSettings: AppSettings = {
   shortcut_side: 'Ctrl+Shift+S',
   shortcut_bar: 'Ctrl+Shift+B',
   shortcut_focus: 'Ctrl+Shift+R',
+  student_id_pattern: 'G1C1N2',
 };
 
 interface SettingsStore {

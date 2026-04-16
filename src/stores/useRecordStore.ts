@@ -26,6 +26,7 @@ interface RecordStore {
     group_id?: number | null,
     source?: RecordSource,
     importance?: Importance,
+    assignment_folder_id?: number | null,
   ) => Promise<void>;
   assignRecord: (id: number, student_id: number, group_id: number) => Promise<void>;
   updateImportance: (id: number, importance: Importance) => Promise<void>;
@@ -75,9 +76,9 @@ export const useRecordStore = create<RecordStore>((set, get) => ({
     }
   },
 
-  addRecord: async (raw_input, generated_sentence, student_id, group_id, source, importance) => {
+  addRecord: async (raw_input, generated_sentence, student_id, group_id, source, importance, assignment_folder_id) => {
     try {
-      await dbAddRecord(raw_input, generated_sentence, student_id, group_id, source, importance);
+      await dbAddRecord(raw_input, generated_sentence, student_id, group_id, source, importance, assignment_folder_id);
       await get().fetchRecords();
       await get().fetchInboxRecords();
     } catch (error) {
