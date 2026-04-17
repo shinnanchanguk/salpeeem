@@ -78,27 +78,38 @@
 
 ## 데이터 모델
 
-### students (학생)
-- id, name, grade(학년), class(반)
+실제 구현 스키마(`src/lib/database.ts`). v1 개발 과정에서 `categories`는 `groups`(계층 트리)로 통합되고, `custom_views`는 v1.1로 연기되었다. 대신 과제/설문 폴더 계층을 위한 `assignment_folders`가 추가되었다.
 
-### categories (영역)
-- id, name, byte_limit
+### students (학생)
+- id, name, grade(학년), class_name(반), student_no(번호)
+
+### groups (영역/그룹, 계층)
+- id, name, parent_id(nullable), sort_order, byte_limit, created_at
+- `parent_id`로 중첩된 영역 트리 구성. 상위 그룹 선택 시 모든 하위 그룹의 레코드를 재귀적으로 포함.
 
 ### records (기록)
-- id, raw_input(원문), generated_sentence(변환 문장), student_id(nullable), category_id(nullable), source(기록/과제/설문), importance(높음/보통/낮음), created_at
-- student_id, category_id가 null이면 인박스 상태
+- id, raw_input(원문), generated_sentence(변환 문장)
+- student_id(nullable), group_id(nullable), assignment_folder_id(nullable)
+- source(기록/과제/설문), importance(높음/보통/낮음), is_edited, created_at
+- student_id 또는 group_id가 null이면 인박스 상태.
+- 그룹/폴더 삭제 시 해당 레코드는 인박스로 복귀(참조만 NULL로).
 
-### custom_views (커스텀 뷰)
-- id, name, student_filter(학생/반/학년 조합, JSON), category_filter(영역 조합, JSON)
+### assignment_folders (과제·설문 폴더, 계층)
+- id, name, parent_id(nullable), folder_type('assignment'|'survey'), group_id(영역 연결), instructions, created_at
 
-### assignments (과제)
-- id, title, category_id, instructions, created_at
-
-### surveys (설문)
-- id, title, instructions, created_at
+### assignments / surveys (히스토리)
+- assignments: id, title, group_id, instructions, created_at
+- surveys: id, title, group_id, instructions, created_at
 
 ### completed_records (완성된 생기부)
-- id, student_id, category_id, final_text, byte_count, status(미완성/완성됨), confirmed_at
+- id, student_id, group_id, final_text, byte_count, status(미완성/완성됨), confirmed_at
+- UNIQUE(student_id, group_id)
+
+### app_settings
+- key, value — API 키·단축키·학번 패턴 등 앱 레벨 설정
+
+### (v1.1) custom_views
+- 학생·영역·학급을 자유롭게 조합한 스마트 폴더. v1에서는 `groups` 계층 트리로 대체 구현되었고, 별도 조합 뷰는 v1.1에서 추가 예정.
 
 ## 사용자 플로우
 
