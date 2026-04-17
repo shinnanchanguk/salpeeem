@@ -12,9 +12,32 @@ import {
   updateAssignmentFolder,
   deleteAssignmentFolder,
   getRecordsByAssignmentFolder,
+  addSubmission,
+  deleteSubmission,
+  deleteSubmissionsByFolder,
+  findSubmissionByFolderAndStudent,
+  updateSubmissionStudent,
+  updateSubmissionPath,
+  getAllSubmissions,
 } from '@/lib/database';
 import { useSettingsStore } from '@/stores/useSettingsStore';
+import { useSubmissionStore } from '@/stores/useSubmissionStore';
 import { matchStudentFromFilename } from '@/lib/studentMatcher';
+import {
+  buildStudentFilename,
+  buildStoredPath,
+  buildUnmatchedPath,
+  buildSurveyResponsePath,
+  buildFolderSegment,
+  saveFileTo,
+  fileToBytes,
+  removeFileSilent,
+  removeDirRecursive,
+  renamePath,
+  directoryExists,
+  openInOS,
+} from '@/lib/submissionStorage';
+import { SubmissionRosterPanel } from '@/components/SubmissionRosterPanel';
 import type { AssignmentFolder, RecordSource, Record as SalpeemRecord } from '@/types';
 
 // ── Styles (kept from original) ────────────────────────────────────
@@ -698,6 +721,7 @@ export function AssignmentView() {
   const { students, fetchStudents } = useStudentStore();
   const { addRecord, deleteRecord } = useRecordStore();
   const { settings } = useSettingsStore();
+  const { fetchForFolder: fetchSubmissionsForFolder } = useSubmissionStore();
 
   // ── Folder state ────────────────────────────────────────────────
   const [folders, setFolders] = useState<AssignmentFolder[]>([]);
@@ -733,6 +757,22 @@ export function AssignmentView() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Current folder submissions (reactive to store) ──────────────
+  const submissionsForSelected = useSubmissionStore((s) =>
+    selectedFolder ? s.byFolder[selectedFolder.id] ?? [] : []
+  );
+
+  // ── Roster responsive state ─────────────────────────────────────
+  const [rosterWide, setRosterWide] = useState<boolean>(
+    typeof window !== 'undefined' ? window.innerWidth >= 1280 : true
+  );
+  const [rosterOverlayOpen, setRosterOverlayOpen] = useState(false);
+  useEffect(() => {
+    const onResize = () => setRosterWide(window.innerWidth >= 1280);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // ── Init ─────────────────────────────────────────────────────────
   useEffect(() => {
     fetchGroups();
@@ -763,6 +803,32 @@ export function AssignmentView() {
       }
     } else if (folderDialog.folderId) {
       const folder = folders.find((f) => f.id === folderDialog.folderId);
+      const root = settings.submission_root_path;
+      // Sync on-disk directory rename before DB update
+      if (folder && root && folder.name !== name) {
+        try {
+          const { join } = await import('@tauri-apps/api/path');
+          const oldSeg = buildFolderSegment(folder, folders);
+          const renamed = { ...folder, name };
+          const newFolders = folders.map((f) => (f.id === folder.id ? renamed : f));
+          const newSeg = buildFolderSegment(renamed, newFolders);
+          if (oldSeg !== newSeg) {
+            const fromPath = await join(root, oldSeg);
+            const toPath = await join(root, newSeg);
+            if (await directoryExists(fromPath)) {
+              await renamePath(fromPath, toPath);
+              const allSubs = await getAllSubmissions();
+              for (const s of allSubs) {
+                if (s.stored_path.startsWith(fromPath)) {
+                  await updateSubmissionPath(s.id, toPath + s.stored_path.slice(fromPath.length));
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error('folder rename on disk failed:', err);
+        }
+      }
       await updateAssignmentFolder(folderDialog.folderId, name, folder?.group_id, folder?.instructions);
       if (selectedFolder?.id === folderDialog.folderId) {
         const all = await getAssignmentFolders();
@@ -780,6 +846,20 @@ export function AssignmentView() {
       ? `"${folder.name}" 폴더와 하위 ${childCount}개 폴더를 삭제하시겠습니까?`
       : `"${folder.name}" 폴더를 삭제하시겠습니까?`;
     if (!confirm(msg)) return;
+
+    // Clean on-disk directory before DB cascade
+    const root = settings.submission_root_path;
+    if (root) {
+      try {
+        const { join } = await import('@tauri-apps/api/path');
+        const seg = buildFolderSegment(folder, folders);
+        const path = await join(root, seg);
+        await removeDirRecursive(path);
+      } catch (err) {
+        console.error('folder delete on disk failed:', err);
+      }
+    }
+
     await deleteAssignmentFolder(folder.id);
     if (selectedFolder?.id === folder.id) {
       setSelectedFolder(null);
@@ -801,6 +881,8 @@ export function AssignmentView() {
     } catch {
       setFolderRecords([]);
     }
+    // Load submissions for the roster panel
+    await fetchSubmissionsForFolder(folder.id);
   };
 
   const handleToggleExpand = (id: number) => {
@@ -829,10 +911,155 @@ export function AssignmentView() {
   // ── Determine the mode from the selected folder ──────────────────
   const isSurveyMode = selectedFolder?.folder_type === 'survey';
 
+  // ── Persist uploaded files to disk + submissions table ────────────
+  const persistUploadedFiles = useCallback(
+    async (files: File[]) => {
+      if (!selectedFolder) return;
+      const root = settings.submission_root_path;
+      if (!root) return;
+
+      const isSurvey = selectedFolder.folder_type === 'survey';
+
+      if (isSurvey) {
+        // 설문: 파일 1개만 사용 (여러 드롭돼도 첫 파일 기준)
+        const file = files[0];
+        if (!file) return;
+        try {
+          const bytes = await fileToBytes(file);
+          const dot = file.name.lastIndexOf('.');
+          const ext = dot >= 0 ? file.name.slice(dot) : '.xlsx';
+          const storedPath = await buildSurveyResponsePath(root, selectedFolder, folders, ext);
+          await saveFileTo(storedPath, bytes);
+
+          const { matchStudentsInSurveyFile } = await import('@/lib/studentMatcher');
+          const matches = await matchStudentsInSurveyFile(file, students, settings.student_id_pattern);
+
+          // 기존 이 폴더 submissions 전부 삭제 후 재생성
+          await deleteSubmissionsByFolder(selectedFolder.id);
+          for (const m of matches) {
+            await addSubmission(
+              selectedFolder.id,
+              m.student?.id ?? null,
+              file.name,
+              storedPath,
+            );
+          }
+        } catch (err) {
+          console.error('survey persist failed:', file.name, err);
+        }
+        await fetchSubmissionsForFolder(selectedFolder.id);
+        return;
+      }
+
+      // 과제 분기: 파일마다 학생 매칭 → 저장
+      for (const file of files) {
+        try {
+          const bytes = await fileToBytes(file);
+          const match = matchStudentFromFilename(file.name, students, settings.student_id_pattern);
+          const student = match.student;
+
+          const filename = student
+            ? buildStudentFilename(student, settings.student_id_pattern, file.name)
+            : file.name;
+          const absolutePath = student
+            ? await buildStoredPath(root, selectedFolder, folders, filename)
+            : await buildUnmatchedPath(root, selectedFolder, folders, file.name);
+
+          if (student) {
+            const existing = await findSubmissionByFolderAndStudent(selectedFolder.id, student.id);
+            if (existing) {
+              await removeFileSilent(existing.stored_path);
+              await deleteSubmission(existing.id);
+            }
+          }
+
+          await saveFileTo(absolutePath, bytes);
+          await addSubmission(
+            selectedFolder.id,
+            student?.id ?? null,
+            file.name,
+            absolutePath,
+          );
+        } catch (err) {
+          console.error('submission persist failed:', file.name, err);
+        }
+      }
+      await fetchSubmissionsForFolder(selectedFolder.id);
+    },
+    [selectedFolder, folders, settings.submission_root_path, settings.student_id_pattern, students, fetchSubmissionsForFolder]
+  );
+
+  // ── Roster actions ──────────────────────────────────────────────
+  const handleAssignUnmatched = useCallback(
+    async (subId: number, studentId: number) => {
+      if (!selectedFolder) return;
+      const root = settings.submission_root_path;
+      if (!root) return;
+      try {
+        const all = await getAllSubmissions();
+        const sub = all.find((s) => s.id === subId);
+        if (!sub) return;
+        const student = students.find((s) => s.id === studentId);
+        if (!student) return;
+
+        const newFilename = buildStudentFilename(student, settings.student_id_pattern, sub.original_filename);
+        const newPath = await buildStoredPath(root, selectedFolder, folders, newFilename);
+
+        // 만약 해당 학생에게 이미 제출이 있으면 덮어쓰기 (기존 파일 + 레코드 제거)
+        const existing = await findSubmissionByFolderAndStudent(selectedFolder.id, studentId);
+        if (existing && existing.id !== subId) {
+          await removeFileSilent(existing.stored_path);
+          await deleteSubmission(existing.id);
+        }
+
+        try {
+          await renamePath(sub.stored_path, newPath);
+        } catch (err) {
+          console.error('rename failed during assign:', err);
+        }
+        await updateSubmissionStudent(subId, studentId, newPath, sub.original_filename);
+        await fetchSubmissionsForFolder(selectedFolder.id);
+      } catch (err) {
+        console.error('assign unmatched failed:', err);
+      }
+    },
+    [selectedFolder, folders, settings.submission_root_path, settings.student_id_pattern, students, fetchSubmissionsForFolder]
+  );
+
+  const handleDropFileOnStudent = useCallback(
+    async (studentId: number, files: File[]) => {
+      if (!selectedFolder) return;
+      const root = settings.submission_root_path;
+      if (!root) return;
+      const student = students.find((s) => s.id === studentId);
+      if (!student) return;
+      const file = files[0];
+      if (!file) return;
+      try {
+        const bytes = await fileToBytes(file);
+        const newFilename = buildStudentFilename(student, settings.student_id_pattern, file.name);
+        const newPath = await buildStoredPath(root, selectedFolder, folders, newFilename);
+
+        const existing = await findSubmissionByFolderAndStudent(selectedFolder.id, studentId);
+        if (existing) {
+          await removeFileSilent(existing.stored_path);
+          await deleteSubmission(existing.id);
+        }
+        await saveFileTo(newPath, bytes);
+        await addSubmission(selectedFolder.id, studentId, file.name, newPath);
+        await fetchSubmissionsForFolder(selectedFolder.id);
+      } catch (err) {
+        console.error('drop-on-student failed:', err);
+      }
+    },
+    [selectedFolder, folders, settings.submission_root_path, settings.student_id_pattern, students, fetchSubmissionsForFolder]
+  );
+
   // ── File handling ────────────────────────────────────────────────
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     setUploadedFiles((prev) => [...prev, ...files]);
+    void persistUploadedFiles(files);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -840,6 +1067,7 @@ export function AssignmentView() {
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files);
     setUploadedFiles((prev) => [...prev, ...files]);
+    void persistUploadedFiles(files);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -1891,6 +2119,82 @@ export function AssignmentView() {
 
       {/* Main Content */}
       <div style={customStyles.mainContent}>{renderRightPanel()}</div>
+
+      {/* Roster Panel (wide) */}
+      {selectedFolder && rosterWide && (
+        <SubmissionRosterPanel
+          folder={selectedFolder}
+          submissions={submissionsForSelected}
+          onOpenFile={(p) => void openInOS(p)}
+          onAssignUnmatched={handleAssignUnmatched}
+          onDropFileOnStudent={handleDropFileOnStudent}
+        />
+      )}
+
+      {/* Roster Panel (narrow overlay) */}
+      {selectedFolder && !rosterWide && rosterOverlayOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: 360,
+            backgroundColor: '#F4F4F2',
+            borderLeft: '1px solid #000',
+            zIndex: 500,
+            boxShadow: '-4px 0 12px rgba(0,0,0,0.1)',
+          }}
+        >
+          <SubmissionRosterPanel
+            folder={selectedFolder}
+            submissions={submissionsForSelected}
+            onOpenFile={(p) => void openInOS(p)}
+            onAssignUnmatched={handleAssignUnmatched}
+            onDropFileOnStudent={handleDropFileOnStudent}
+          />
+          <button
+            onClick={() => setRosterOverlayOpen(false)}
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              padding: '4px 10px',
+              border: '1px solid #000',
+              borderRadius: 6,
+              background: '#fff',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 13,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Roster toggle (narrow) */}
+      {selectedFolder && !rosterWide && !rosterOverlayOpen && (
+        <button
+          onClick={() => setRosterOverlayOpen(true)}
+          style={{
+            position: 'absolute',
+            top: 16,
+            right: 16,
+            padding: '8px 14px',
+            border: '1px solid #000',
+            borderRadius: 8,
+            backgroundColor: '#fff',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 13,
+            fontWeight: 600,
+            zIndex: 100,
+          }}
+        >
+          📋 명렬 보기
+        </button>
+      )}
 
       {/* Folder Create/Rename Dialog */}
       {folderDialog.open && (

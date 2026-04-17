@@ -243,6 +243,25 @@ export interface SurveyStudentData {
 }
 
 /** CSV 행 데이터를 학생별로 정리 */
+/** 엑셀/CSV 파일을 읽어 학생별 응답을 매칭해 반환. 설문 공용 응답 파일 처리용. */
+export async function matchStudentsInSurveyFile(
+  file: File,
+  students: Student[],
+  pattern: StudentIdPattern,
+): Promise<SurveyStudentData[]> {
+  const XLSX = await import('xlsx');
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+  const firstSheet = wb.Sheets[wb.SheetNames[0]];
+  if (!firstSheet) return [];
+  const rawRows: any[][] = XLSX.utils.sheet_to_json<any[]>(firstSheet, { header: 1, defval: '' });
+  if (rawRows.length < 2) return [];
+  const headers = rawRows[0].map((h: any) => String(h ?? ''));
+  const dataRows = rawRows.slice(1).map((row: any[]) => row.map((c) => String(c ?? '')));
+  const mapping = detectColumnMapping(headers);
+  return parseSurveyRows(dataRows, mapping, students, pattern);
+}
+
 export function parseSurveyRows(
   rows: string[][],
   mapping: ColumnMapping,
