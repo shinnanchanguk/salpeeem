@@ -242,7 +242,7 @@ const hoverHandlers = {
 
 // --- Sidebar items ---
 
-const sidebarItems = ['학생 명단 관리', '영역 관리', 'AI 연결', '단축키 설정', '데이터 관리'];
+const sidebarItems = ['학생 명단 관리', '영역 관리', 'AI 연결', '단축키 설정', '제출물 저장', '데이터 관리'];
 
 // ===========================================================================
 // 1. Student Management Section
@@ -336,8 +336,23 @@ const StudentListSection: React.FC = () => {
           <select
             value={settings.student_id_pattern}
             onChange={async (e) => {
-              updateSetting('student_id_pattern', e.target.value as any);
+              const next = e.target.value as any;
+              updateSetting('student_id_pattern', next);
               await saveAllSettings();
+              try {
+                const { getAllSubmissions } = await import('@/lib/database');
+                const subs = await getAllSubmissions();
+                if (subs.some((s) => s.student_id !== null)) {
+                  const yes = window.confirm('저장된 제출물 파일들을 새 학번 규칙으로 일괄 변경할까요?');
+                  if (yes) {
+                    const { renameAllToPattern } = await import('@/lib/submissionStorage-migrate');
+                    const n = await renameAllToPattern();
+                    alert(`${n}개 파일 이름이 변경되었습니다.`);
+                  }
+                }
+              } catch (err) {
+                console.error('pattern rename failed:', err);
+              }
             }}
             style={{ ...customStyles.formInput, width: 'auto', minWidth: '320px' }}
           >
@@ -940,7 +955,164 @@ const ShortcutSection: React.FC = () => {
 };
 
 // ===========================================================================
-// 5. Data Management Section
+// 5. Submission Storage Section
+// ===========================================================================
+
+const SubmissionStorageSection: React.FC = () => {
+  const { settings, updateSetting, saveAllSettings } = useSettingsStore();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const handlePick = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: settings.submission_root_path || undefined,
+      });
+      if (typeof picked !== 'string') return;
+      if (picked === settings.submission_root_path) return;
+
+      const oldPath = settings.submission_root_path;
+      const doMove = window.confirm(
+        `저장 경로를 변경합니다.\n기존 파일들을 새 경로로 이동할까요?\n\n이전: ${oldPath || '(미설정)'}\n새 경로: ${picked}`
+      );
+      updateSetting('submission_root_path', picked);
+      await saveAllSettings();
+
+      if (doMove && oldPath) {
+        setBusy(true);
+        setMessage('파일을 새 경로로 이동 중...');
+        try {
+          const { moveRoot } = await import('@/lib/submissionStorage-migrate');
+          await moveRoot(oldPath, picked);
+          setMessage('이동 완료');
+        } catch (e) {
+          setMessage('이동 중 오류: ' + (e instanceof Error ? e.message : String(e)));
+        } finally {
+          setBusy(false);
+        }
+      } else {
+        setMessage('경로가 변경되었습니다. 이후 업로드되는 파일은 새 경로에 저장됩니다.');
+      }
+    } catch (e) {
+      setMessage('경로 선택 중 오류: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const handleOpenExplorer = async () => {
+    if (!settings.submission_root_path) return;
+    try {
+      const { openInOS } = await import('@/lib/submissionStorage');
+      await openInOS(settings.submission_root_path);
+    } catch (e) {
+      setMessage('폴더 열기 실패: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const handleRenameAll = async () => {
+    if (!window.confirm('저장된 모든 제출물 파일명을 현재 학번 규칙으로 일괄 변경할까요?')) return;
+    setBusy(true);
+    setMessage('일괄 변경 중...');
+    try {
+      const { renameAllToPattern } = await import('@/lib/submissionStorage-migrate');
+      const n = await renameAllToPattern();
+      setMessage(`${n}개 파일 이름 변경 완료`);
+    } catch (e) {
+      setMessage('변경 중 오류: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sampleName = settings.student_id_pattern === 'G1C1N2' ? '2315_홍길동.docx' : '20315_홍길동.docx';
+
+  return (
+    <>
+      <div style={customStyles.sectionHeader}>
+        <h1 style={customStyles.sectionTitle}>제출물 저장</h1>
+        <p style={customStyles.sectionDesc}>
+          학생이 올린 과제·설문 파일이 저장될 경로를 설정합니다. 여기에 저장된 파일은 Salpeem에서
+          명렬 클릭으로 바로 열 수 있고, 탐색기로도 직접 접근할 수 있습니다.
+        </p>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+        <div>
+          <div style={{ fontSize: 13, color: '#555', marginBottom: 8, fontWeight: 600 }}>현재 저장 경로</div>
+          <div
+            style={{
+              padding: '12px 14px',
+              border: '1px solid #000',
+              borderRadius: 8,
+              backgroundColor: '#fff',
+              fontSize: 14,
+              fontFamily: 'monospace',
+              wordBreak: 'break-all',
+              color: settings.submission_root_path ? '#111' : '#888',
+            }}
+          >
+            {settings.submission_root_path || '(미설정 — 앱 재시작 시 자동 지정됩니다)'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button style={customStyles.btnSecondary} onClick={handlePick} disabled={busy}>
+              폴더 변경
+            </button>
+            <button
+              style={customStyles.btnSecondary}
+              onClick={handleOpenExplorer}
+              disabled={busy || !settings.submission_root_path}
+            >
+              탐색기에서 열기
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 13, color: '#555', marginBottom: 8, fontWeight: 600 }}>파일명 규칙</div>
+          <div style={{ fontSize: 14, color: '#111', lineHeight: 1.7 }}>
+            현재 학번 규칙(<b>{settings.student_id_pattern}</b>)을 따릅니다. 예:
+            <code
+              style={{
+                marginLeft: 8,
+                padding: '2px 8px',
+                backgroundColor: '#F4F4F2',
+                borderRadius: 4,
+                fontSize: 13,
+              }}
+            >
+              {sampleName}
+            </code>
+            <br />
+            규칙은 <b>학생 명단 관리</b> 설정에서 변경할 수 있습니다.
+          </div>
+          <button style={{ ...customStyles.btnSecondary, marginTop: 12 }} onClick={handleRenameAll} disabled={busy}>
+            기존 파일 전체를 현재 규칙으로 재명명
+          </button>
+        </div>
+
+        {message && (
+          <div
+            style={{
+              padding: '10px 14px',
+              backgroundColor: '#F0FDF4',
+              border: '1px solid #10B981',
+              borderRadius: 8,
+              fontSize: 13,
+              color: '#065F46',
+            }}
+          >
+            {message}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+// ===========================================================================
+// 6. Data Management Section
 // ===========================================================================
 
 const DataManagementSection: React.FC = () => {
@@ -1127,6 +1299,7 @@ const sectionComponents: Record<string, React.FC> = {
   '영역 관리': AreaManagementSection,
   'AI 연결': AIConnectionSection,
   '단축키 설정': ShortcutSection,
+  '제출물 저장': SubmissionStorageSection,
   '데이터 관리': DataManagementSection,
 };
 
