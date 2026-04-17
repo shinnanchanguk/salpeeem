@@ -65,8 +65,10 @@ CREATE TABLE IF NOT EXISTS assignments (
 CREATE TABLE IF NOT EXISTS surveys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
+  group_id INTEGER,
   instructions TEXT,
-  created_at TEXT DEFAULT (datetime('now','localtime'))
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY(group_id) REFERENCES groups(id)
 );
 
 CREATE TABLE IF NOT EXISTS completed_records (
@@ -154,12 +156,27 @@ function createInMemoryDb(): DatabaseLike {
       // records
       if (q.includes('FROM RECORDS')) {
         if (q.includes('COUNT(*)')) {
+          if (q.includes('GROUP_ID IN')) {
+            // recursive: first bind is student_id, rest are group ids
+            const sId = bindValues[0] as number;
+            const gIds = bindValues.slice(1) as number[];
+            const count = (tables.records as any[]).filter(
+              (r) => r.student_id === sId && gIds.includes(r.group_id)
+            ).length;
+            return [{ count }] as unknown as T;
+          }
           const sId = bindValues[0] as number;
           const gId = bindValues[1] as number;
           const count = (tables.records as any[]).filter(
             (r) => r.student_id === sId && r.group_id === gId
           ).length;
           return [{ count }] as unknown as T;
+        }
+        if (q.includes('GROUP_ID IN')) {
+          const gIds = bindValues as number[];
+          return (tables.records as any[]).filter(
+            (r) => gIds.includes(r.group_id)
+          ) as unknown as T;
         }
         if (q.includes('ASSIGNMENT_FOLDER_ID') && bindValues.length === 1) {
           return (tables.records as any[]).filter(
@@ -349,6 +366,55 @@ function createInMemoryDb(): DatabaseLike {
         if (idx >= 0) tables.records.splice(idx, 1);
         return { rowsAffected: idx >= 0 ? 1 : 0, lastInsertId: 0 };
       }
+      // UPDATE records SET group_id = NULL WHERE group_id = $1  (cascade)
+      if (q.startsWith('UPDATE RECORDS') && q.includes('GROUP_ID = NULL')) {
+        let affected = 0;
+        for (const row of tables.records as any[]) {
+          if (row.group_id === bindValues[0]) {
+            row.group_id = null;
+            affected++;
+          }
+        }
+        return { rowsAffected: affected, lastInsertId: 0 };
+      }
+      // UPDATE records SET assignment_folder_id = NULL WHERE assignment_folder_id = $1
+      if (q.startsWith('UPDATE RECORDS') && q.includes('ASSIGNMENT_FOLDER_ID = NULL')) {
+        let affected = 0;
+        for (const row of tables.records as any[]) {
+          if (row.assignment_folder_id === bindValues[0]) {
+            row.assignment_folder_id = null;
+            affected++;
+          }
+        }
+        return { rowsAffected: affected, lastInsertId: 0 };
+      }
+      // DELETE FROM completed_records WHERE group_id = $1
+      if (q.startsWith('DELETE FROM COMPLETED_RECORDS')) {
+        const before = tables.completed_records.length;
+        tables.completed_records = (tables.completed_records as any[]).filter(
+          (r) => r.group_id !== bindValues[0]
+        );
+        return { rowsAffected: before - tables.completed_records.length, lastInsertId: 0 };
+      }
+      // Generic: UPDATE <table> SET group_id = NULL WHERE group_id = $1
+      if (
+        q.includes('GROUP_ID = NULL') &&
+        (q.startsWith('UPDATE SURVEYS') || q.startsWith('UPDATE ASSIGNMENTS') || q.startsWith('UPDATE ASSIGNMENT_FOLDERS'))
+      ) {
+        const tableName = q.startsWith('UPDATE SURVEYS')
+          ? 'surveys'
+          : q.startsWith('UPDATE ASSIGNMENTS')
+            ? 'assignments'
+            : 'assignment_folders';
+        let affected = 0;
+        for (const row of tables[tableName] as any[]) {
+          if (row.group_id === bindValues[0]) {
+            row.group_id = null;
+            affected++;
+          }
+        }
+        return { rowsAffected: affected, lastInsertId: 0 };
+      }
 
       // INSERT INTO assignments
       if (q.startsWith('INSERT INTO ASSIGNMENTS')) {
@@ -363,13 +429,14 @@ function createInMemoryDb(): DatabaseLike {
         return { rowsAffected: 1, lastInsertId: id };
       }
 
-      // INSERT INTO surveys
+      // INSERT INTO surveys (title, group_id, instructions)
       if (q.startsWith('INSERT INTO SURVEYS')) {
         const id = ++autoIncrements.surveys;
         tables.surveys.push({
           id,
           title: bindValues[0],
-          instructions: bindValues[1],
+          group_id: bindValues[1] ?? null,
+          instructions: bindValues[2] ?? '',
           created_at: new Date().toISOString(),
         });
         return { rowsAffected: 1, lastInsertId: id };
@@ -489,6 +556,15 @@ export async function initDatabase(): Promise<DatabaseLike> {
     try {
       await instance.execute(
         'ALTER TABLE records ADD COLUMN assignment_folder_id INTEGER DEFAULT NULL REFERENCES assignment_folders(id)'
+      );
+    } catch {
+      // column already exists — ignore
+    }
+
+    // Migration: add group_id to surveys if not exists
+    try {
+      await instance.execute(
+        'ALTER TABLE surveys ADD COLUMN group_id INTEGER REFERENCES groups(id)'
       );
     } catch {
       // column already exists — ignore
@@ -620,6 +696,15 @@ export async function deleteGroup(id: number): Promise<void> {
     toDelete.push(parentId);
   };
   collectIds(id);
+  // Move orphaned records back to inbox, drop stale completed drafts, null FK refs
+  for (const groupId of toDelete) {
+    await d.execute('UPDATE records SET group_id = NULL WHERE group_id = $1', [groupId]);
+    // completed_records has NOT NULL group_id constraint → must delete
+    await d.execute('DELETE FROM completed_records WHERE group_id = $1', [groupId]);
+    await d.execute('UPDATE surveys SET group_id = NULL WHERE group_id = $1', [groupId]);
+    await d.execute('UPDATE assignments SET group_id = NULL WHERE group_id = $1', [groupId]);
+    await d.execute('UPDATE assignment_folders SET group_id = NULL WHERE group_id = $1', [groupId]);
+  }
   for (const groupId of toDelete) {
     await d.execute('DELETE FROM groups WHERE id = $1', [groupId]);
   }
@@ -677,6 +762,33 @@ export async function getRecordsByGroup(groupId: number): Promise<SalpeemRecord[
     WHERE r.group_id = $1
     ORDER BY r.created_at DESC
   `, [groupId]);
+}
+
+/**
+ * Returns all records belonging to groupId OR any of its descendants.
+ * Used when selecting a parent group to show the union of all nested records.
+ */
+export async function getRecordsByGroupRecursive(groupId: number): Promise<SalpeemRecord[]> {
+  const d = await getDb();
+  const all = await d.select<Group[]>('SELECT * FROM groups');
+  const ids: number[] = [];
+  const collect = (parentId: number) => {
+    ids.push(parentId);
+    for (const child of all.filter((g) => g.parent_id === parentId)) {
+      collect(child.id);
+    }
+  };
+  collect(groupId);
+  const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
+  return d.select<SalpeemRecord[]>(
+    `SELECT r.*, s.name AS student_name, g.name AS group_name
+     FROM records r
+     LEFT JOIN students s ON r.student_id = s.id
+     LEFT JOIN groups g ON r.group_id = g.id
+     WHERE r.group_id IN (${placeholders})
+     ORDER BY r.created_at DESC`,
+    ids
+  );
 }
 
 export async function getRecordsByFilter(
@@ -785,6 +897,33 @@ export async function getRecordCountByStudentAndGroup(
   return result[0]?.count ?? 0;
 }
 
+/**
+ * Record count including every descendant group of `group_id`.
+ * Used by CompletionView so that selecting a parent group shows the full body
+ * of sentences that would contribute to the student's final draft.
+ */
+export async function getRecordCountByStudentAndGroupRecursive(
+  student_id: number,
+  group_id: number
+): Promise<number> {
+  const d = await getDb();
+  const all = await d.select<Group[]>('SELECT * FROM groups');
+  const ids: number[] = [];
+  const collect = (parentId: number) => {
+    ids.push(parentId);
+    for (const child of all.filter((g) => g.parent_id === parentId)) {
+      collect(child.id);
+    }
+  };
+  collect(group_id);
+  const placeholders = ids.map((_, i) => `$${i + 2}`).join(', ');
+  const result = await d.select<{ count: number }[]>(
+    `SELECT COUNT(*) as count FROM records WHERE student_id = $1 AND group_id IN (${placeholders})`,
+    [student_id, ...ids]
+  );
+  return result[0]?.count ?? 0;
+}
+
 // ─── Assignments ──────────────────────────────────────────────────────
 export async function getAssignments(): Promise<Assignment[]> {
   const d = await getDb();
@@ -811,13 +950,14 @@ export async function getSurveys(): Promise<Survey[]> {
 
 export async function addSurvey(
   title: string,
-  instructions: string
+  instructions: string,
+  group_id?: number | null
 ): Promise<{ lastInsertId: number }> {
   const d = await getDb();
-  return d.execute('INSERT INTO surveys (title, instructions) VALUES ($1, $2)', [
-    title,
-    instructions,
-  ]);
+  return d.execute(
+    'INSERT INTO surveys (title, group_id, instructions) VALUES ($1, $2, $3)',
+    [title, group_id ?? null, instructions]
+  );
 }
 
 // ─── CompletedRecords ─────────────────────────────────────────────────
@@ -943,6 +1083,13 @@ export async function deleteAssignmentFolder(id: number): Promise<void> {
     toDelete.push(parentId);
   };
   collectIds(id);
+  // Detach records before deleting the folders so they stay in inbox/group
+  for (const folderId of toDelete) {
+    await d.execute(
+      'UPDATE records SET assignment_folder_id = NULL WHERE assignment_folder_id = $1',
+      [folderId]
+    );
+  }
   for (const folderId of toDelete) {
     await d.execute('DELETE FROM assignment_folders WHERE id = $1', [folderId]);
   }
