@@ -8,6 +8,7 @@ import type {
   RecordSource,
   Importance,
   AssignmentFolder,
+  Submission,
 } from '../types';
 
 // ─── Database interface ───────────────────────────────────────────────
@@ -100,6 +101,21 @@ CREATE TABLE IF NOT EXISTS assignment_folders (
   FOREIGN KEY(parent_id) REFERENCES assignment_folders(id),
   FOREIGN KEY(group_id) REFERENCES groups(id)
 );
+
+CREATE TABLE IF NOT EXISTS submissions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assignment_folder_id INTEGER NOT NULL,
+  student_id INTEGER,
+  original_filename TEXT NOT NULL,
+  stored_path TEXT NOT NULL,
+  uploaded_at TEXT DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY(assignment_folder_id) REFERENCES assignment_folders(id) ON DELETE CASCADE,
+  FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_folder_student
+  ON submissions(assignment_folder_id, student_id)
+  WHERE student_id IS NOT NULL;
 `;
 
 // ─── In-memory stub for non-Tauri environments ────────────────────────
@@ -113,6 +129,7 @@ function createInMemoryDb(): DatabaseLike {
     completed_records: [],
     app_settings: [],
     assignment_folders: [],
+    submissions: [],
   };
 
   const autoIncrements: { [key: string]: number } = {
@@ -123,6 +140,7 @@ function createInMemoryDb(): DatabaseLike {
     surveys: 0,
     completed_records: 0,
     assignment_folders: 0,
+    submissions: 0,
   };
 
   return {
@@ -236,6 +254,34 @@ function createInMemoryDb(): DatabaseLike {
           ) as unknown as T;
         }
         return tables.assignment_folders as unknown as T;
+      }
+      // submissions
+      if (q.includes('FROM SUBMISSIONS')) {
+        if (q.includes('WHERE') && q.includes('ASSIGNMENT_FOLDER_ID') && q.includes('STUDENT_ID') && bindValues.length >= 2) {
+          const fid = bindValues[0];
+          const sid = bindValues[1];
+          return (tables.submissions as any[]).filter(
+            (s: any) => s.assignment_folder_id === fid && s.student_id === sid
+          ) as unknown as T;
+        }
+        if (q.includes('WHERE') && q.includes('ASSIGNMENT_FOLDER_ID') && bindValues.length >= 1) {
+          const fid = bindValues[0];
+          const rows = (tables.submissions as any[]).filter(
+            (s: any) => s.assignment_folder_id === fid
+          );
+          // Enrich with joined student fields (mirror SQL LEFT JOIN students)
+          return rows.map((sub: any) => {
+            const student = (tables.students as any[]).find((st: any) => st.id === sub.student_id);
+            return {
+              ...sub,
+              student_name: student?.name,
+              grade: student?.grade,
+              class_name: student?.class_name,
+              student_no: student?.student_no,
+            };
+          }) as unknown as T;
+        }
+        return tables.submissions as unknown as T;
       }
       return [] as unknown as T;
     },
@@ -482,6 +528,51 @@ function createInMemoryDb(): DatabaseLike {
         };
         deleteRecursive(id);
         return { rowsAffected: 1, lastInsertId: 0 };
+      }
+
+      // INSERT INTO submissions
+      if (q.startsWith('INSERT INTO SUBMISSIONS')) {
+        const id = ++autoIncrements.submissions;
+        tables.submissions.push({
+          id,
+          assignment_folder_id: bindValues[0],
+          student_id: bindValues[1] ?? null,
+          original_filename: bindValues[2],
+          stored_path: bindValues[3],
+          uploaded_at: new Date().toISOString(),
+        });
+        return { rowsAffected: 1, lastInsertId: id };
+      }
+      // UPDATE submissions SET student_id, stored_path, original_filename
+      if (q.startsWith('UPDATE SUBMISSIONS') && q.includes('STUDENT_ID') && q.includes('ORIGINAL_FILENAME')) {
+        const row = (tables.submissions as any[]).find((r) => r.id === bindValues[3]);
+        if (row) {
+          row.student_id = bindValues[0];
+          row.stored_path = bindValues[1];
+          row.original_filename = bindValues[2];
+        }
+        return { rowsAffected: row ? 1 : 0, lastInsertId: 0 };
+      }
+      // UPDATE submissions SET stored_path
+      if (q.startsWith('UPDATE SUBMISSIONS') && q.includes('STORED_PATH')) {
+        const row = (tables.submissions as any[]).find((r) => r.id === bindValues[1]);
+        if (row) {
+          row.stored_path = bindValues[0];
+        }
+        return { rowsAffected: row ? 1 : 0, lastInsertId: 0 };
+      }
+      // DELETE FROM submissions WHERE assignment_folder_id
+      if (q.startsWith('DELETE FROM SUBMISSIONS') && q.includes('ASSIGNMENT_FOLDER_ID')) {
+        const fid = bindValues[0];
+        const before = tables.submissions.length;
+        tables.submissions = (tables.submissions as any[]).filter((s) => s.assignment_folder_id !== fid);
+        return { rowsAffected: before - tables.submissions.length, lastInsertId: 0 };
+      }
+      // DELETE FROM submissions WHERE id
+      if (q.startsWith('DELETE FROM SUBMISSIONS')) {
+        const idx = (tables.submissions as any[]).findIndex((s) => s.id === bindValues[0]);
+        if (idx >= 0) tables.submissions.splice(idx, 1);
+        return { rowsAffected: idx >= 0 ? 1 : 0, lastInsertId: 0 };
       }
 
       // INSERT OR REPLACE INTO completed_records
@@ -1119,6 +1210,88 @@ export async function getRecordsByAssignmentFolder(folderId: number): Promise<Sa
     WHERE r.assignment_folder_id = $1
     ORDER BY r.created_at DESC
   `, [folderId]);
+}
+
+// ─── Submissions ──────────────────────────────────────────────────────
+export async function getSubmissionsByFolder(folderId: number): Promise<Submission[]> {
+  const d = await getDb();
+  return d.select<Submission[]>(
+    `SELECT sub.*, s.name AS student_name, s.grade, s.class_name, s.student_no
+     FROM submissions sub
+     LEFT JOIN students s ON sub.student_id = s.id
+     WHERE sub.assignment_folder_id = $1
+     ORDER BY s.grade, s.class_name, s.student_no, sub.uploaded_at DESC`,
+    [folderId]
+  );
+}
+
+export async function addSubmission(
+  assignmentFolderId: number,
+  studentId: number | null,
+  originalFilename: string,
+  storedPath: string,
+): Promise<{ lastInsertId: number }> {
+  const d = await getDb();
+  return d.execute(
+    `INSERT INTO submissions (assignment_folder_id, student_id, original_filename, stored_path)
+     VALUES ($1, $2, $3, $4)`,
+    [assignmentFolderId, studentId, originalFilename, storedPath]
+  );
+}
+
+export async function updateSubmissionStudent(
+  id: number,
+  studentId: number | null,
+  storedPath: string,
+  originalFilename: string,
+): Promise<void> {
+  const d = await getDb();
+  await d.execute(
+    `UPDATE submissions SET student_id = $1, stored_path = $2, original_filename = $3 WHERE id = $4`,
+    [studentId, storedPath, originalFilename, id]
+  );
+}
+
+export async function updateSubmissionPath(id: number, storedPath: string): Promise<void> {
+  const d = await getDb();
+  await d.execute(`UPDATE submissions SET stored_path = $1 WHERE id = $2`, [storedPath, id]);
+}
+
+export async function deleteSubmission(id: number): Promise<void> {
+  const d = await getDb();
+  await d.execute(`DELETE FROM submissions WHERE id = $1`, [id]);
+}
+
+export async function deleteSubmissionsByFolder(folderId: number): Promise<void> {
+  const d = await getDb();
+  await d.execute(`DELETE FROM submissions WHERE assignment_folder_id = $1`, [folderId]);
+}
+
+export async function findSubmissionByFolderAndStudent(
+  folderId: number,
+  studentId: number,
+): Promise<Submission | null> {
+  const d = await getDb();
+  const rows = await d.select<Submission[]>(
+    `SELECT * FROM submissions WHERE assignment_folder_id = $1 AND student_id = $2 LIMIT 1`,
+    [folderId, studentId]
+  );
+  return rows[0] ?? null;
+}
+
+export async function getAllSubmissions(): Promise<Submission[]> {
+  const d = await getDb();
+  return d.select<Submission[]>(`SELECT * FROM submissions`);
+}
+
+export async function getDefaultSubmissionRoot(): Promise<string> {
+  try {
+    const { documentDir, join } = await import('@tauri-apps/api/path');
+    const docs = await documentDir();
+    return await join(docs, '살핌', '제출물');
+  } catch {
+    return '';
+  }
 }
 
 // ─── Seed test students ──────────────────────────────────────────────

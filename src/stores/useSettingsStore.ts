@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { AppSettings } from '@/types';
-import { getAllSettings, setSetting } from '@/lib/database';
+import { getAllSettings, setSetting, getDefaultSubmissionRoot } from '@/lib/database';
 import { setAIConfig } from '@/lib/ai-service';
 
 const defaultSettings: AppSettings = {
@@ -12,6 +12,7 @@ const defaultSettings: AppSettings = {
   shortcut_bar: 'Ctrl+Shift+B',
   shortcut_focus: 'Ctrl+Shift+R',
   student_id_pattern: 'G1C1N2',
+  submission_root_path: '',
 };
 
 interface SettingsStore {
@@ -41,6 +42,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         }
       }
       const merged = { ...defaultSettings, ...saved };
+      // First-run: populate submission root to ~/Documents/살핌/제출물
+      if (!merged.submission_root_path) {
+        const fallback = await getDefaultSubmissionRoot();
+        if (fallback) {
+          merged.submission_root_path = fallback;
+          await setSetting('submission_root_path', fallback);
+        }
+      }
       set({ settings: merged, initialized: true });
       // Sync AI config
       if (merged.use_custom_key && merged.openrouter_api_key) {

@@ -91,6 +91,21 @@ export interface AssignmentFolder {
   children?: AssignmentFolder[];
 }
 
+/** 제출물 (과제·설문 폴더에 학생별로 저장되는 원본 파일 레코드) */
+export interface Submission {
+  id: number;
+  assignment_folder_id: number;
+  student_id: number | null;
+  original_filename: string;
+  stored_path: string;
+  uploaded_at: string;
+  /** JOIN된 필드 (optional) */
+  student_name?: string;
+  grade?: string;
+  class_name?: string;
+  student_no?: number;
+}
+
 /** 학번 패턴 — G=학년자릿수, C=반자릿수, N=번호자릿수 */
 export type StudentIdPattern = 'G1C1N2' | 'G1C2N2';
 
@@ -104,6 +119,7 @@ export interface AppSettings {
   shortcut_bar: string;
   shortcut_focus: string;
   student_id_pattern: StudentIdPattern;
+  submission_root_path: string;
 }
 
 /** 바이트 계산 — 나이스(NEIS) 기준
