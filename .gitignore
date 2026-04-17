@@ -20,6 +20,11 @@ dist-ssr
 # Tauri signing keys
 .tauri/
 
+# Local tooling / per-session logs
+.codex
+.dev-loop-checklist.md
+.playwright-mcp/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
