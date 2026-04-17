@@ -1,7 +1,37 @@
-# Tauri + React + Typescript
+# 살핌 (Salpeem)
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+교사가 수업 중 관찰 메모를 30초 만에 입력하면, AI가 생활기록부 문장으로 변환하고 학생·영역별로 축적해 학기말 생기부 작성을 완성해 주는 데스크톱 앱입니다.
 
-## Recommended IDE Setup
+## 주요 기능
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- **빠른 기록** — `@학생 /그룹` 태그를 붙여 입력하면 AI가 공식 문장으로 변환 후 자동 분류. 태그 없이 적으면 인박스로 들어갑니다.
+- **과제·설문 문장화** — 폴더에 안내사항을 적고 학생 제출물(엑셀/워드/PDF/이미지)을 업로드하면 학생별 문장을 한 번에 생성합니다.
+- **문장 완성하기** — 학기말에 학생×영역을 선택하고 초안을 일괄 생성, 영역 완성 화면에서 AI와 대화로 다듬어 확정합니다.
+- **세 가지 창 모드** — 전체 / 사이드(세로 패널) / 바(한 줄) 모드. 전역 단축키로 즉시 전환.
+- **로컬 저장** — 모든 데이터는 SQLite 로컬 DB에 저장됩니다. 학생 개인정보는 AI에 전송되지 않습니다 (학생N으로 익명화).
+
+## 기술 스택
+
+Tauri v2 · Vite · React 19 · TypeScript · Tailwind + shadcn/ui · Zustand · SQLite
+
+## 빌드·실행
+
+```bash
+npm install
+npm run tauri dev      # 개발 모드 (테스트 샘플 데이터 자동 주입)
+npm run tauri build    # 프로덕션 설치파일 생성
+```
+
+프로덕션 빌드는 GitHub Actions에서 태그 푸시(`v*`)로 Windows/macOS 인스톨러를 자동 생성합니다.
+
+## AI 키
+
+설정 화면에서 OpenRouter API 키를 등록할 수 있습니다. 기본값은 내장 키가 사용됩니다.
+
+## 설치 후 처음 실행 시 (macOS)
+
+미서명 빌드라 "앱이 손상되었다"는 경고가 뜨면 Finder에서 **우클릭 → 열기**를 한 번 선택하면 그 이후부터는 정상적으로 실행됩니다.
+
+## 프로젝트 플랜
+
+전체 기능 범위·화면 구조·기술 결정·마일스톤은 [`docs/plan.md`](docs/plan.md) 참조.
