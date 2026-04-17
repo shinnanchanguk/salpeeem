@@ -6,9 +6,8 @@
  * folders, completed drafts, etc.) without forcing the developer to click
  * through manual setup.
  *
- * Modeled after real classroom artifacts from the original `last` project
- * (`/mnt/c/Users/창욱/Desktop/code/last/`) — student names, activity titles,
- * sentence wordings — but PII-scrubbed: every student name here is fictional.
+ * All student names, activity titles, and sentence wordings here are
+ * fabricated — no real student data is included.
  *
  * Only runs when `existing rows === 0` so it never clobbers an in-progress
  * dev DB.
