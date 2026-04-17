@@ -3,7 +3,7 @@ import type { Record, RecordSource, Importance } from '@/types';
 import {
   getRecords,
   getInboxRecords,
-  getRecordsByGroup,
+  getRecordsByGroupRecursive,
   addRecord as dbAddRecord,
   updateRecordAssignment,
   updateRecordImportance,
@@ -69,7 +69,8 @@ export const useRecordStore = create<RecordStore>((set, get) => ({
   fetchGroupRecords: async (groupId: number) => {
     set({ loading: true });
     try {
-      const groupRecords = await getRecordsByGroup(groupId);
+      // Recursive: parent group shows its own + all descendants' records
+      const groupRecords = await getRecordsByGroupRecursive(groupId);
       set({ groupRecords });
     } catch (error) {
       console.error('Failed to fetch group records:', error);
@@ -91,8 +92,14 @@ export const useRecordStore = create<RecordStore>((set, get) => ({
   assignRecord: async (id, student_id, group_id) => {
     try {
       await updateRecordAssignment(id, student_id, group_id);
+      // Drop from current group list if it no longer belongs here; inbox refetch
+      // will restore orphans. Full refetch ensures join fields (student_name/
+      // group_name) come back fresh from SQL.
       await get().fetchRecords();
       await get().fetchInboxRecords();
+      set((state) => ({
+        groupRecords: state.groupRecords.filter((r) => r.id !== id),
+      }));
     } catch (error) {
       console.error('Failed to assign record:', error);
     }
@@ -101,7 +108,17 @@ export const useRecordStore = create<RecordStore>((set, get) => ({
   updateImportance: async (id, importance) => {
     try {
       await updateRecordImportance(id, importance);
-      await get().fetchRecords();
+      // Optimistic local update so UI reflects change immediately in the
+      // currently visible list without requiring a full refetch.
+      set((state) => ({
+        records: state.records.map((r) => (r.id === id ? { ...r, importance } : r)),
+        inboxRecords: state.inboxRecords.map((r) =>
+          r.id === id ? { ...r, importance } : r,
+        ),
+        groupRecords: state.groupRecords.map((r) =>
+          r.id === id ? { ...r, importance } : r,
+        ),
+      }));
     } catch (error) {
       console.error('Failed to update importance:', error);
     }

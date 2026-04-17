@@ -348,6 +348,20 @@ export async function generateSurveySentences(
 }
 
 /**
+ * Tone for area draft generation.
+ * - 'objective' (default): 사실 그대로 서술
+ * - 'growth': 성장 과정·변화를 강조
+ * - 'specific': 구체적 활동·사례를 우선 상세히
+ */
+export type DraftTone = 'objective' | 'growth' | 'specific';
+
+const TONE_GUIDANCE: Record<DraftTone, string> = {
+  objective: '관찰된 사실을 중립적이고 담담한 어조로 서술합니다.',
+  growth: '초기 상태와 나중의 변화를 대비하여, 학생의 성장 과정이 드러나도록 서술합니다.',
+  specific: '구체적인 활동명·방법·결과를 풍부하게 노출해 서술합니다. 추상적 역량 요약보다 사례 중심으로 기술합니다.',
+};
+
+/**
  * Generate a complete area draft from accumulated sentences for a student.
  */
 export async function generateAreaDraft(
@@ -355,6 +369,7 @@ export async function generateAreaDraft(
   areaName: string,
   sentences: Array<{ content: string; importance: string; source: string }>,
   byteLimit: number,
+  tone: DraftTone = 'objective',
 ): Promise<string> {
   const sentencesText = sentences
     .map(
@@ -368,6 +383,7 @@ export async function generateAreaDraft(
     `해당 학생의 "${areaName}" 영역에 대한 생활기록부 문단을 작성해주세요. ` +
     `아래 수집된 문장들을 종합하여 하나의 완성된 문단으로 작성합니다.\n\n` +
     SEUNGGIBOO_RULES + `\n\n` +
+    `## 문체 지침\n- ${TONE_GUIDANCE[tone]}\n\n` +
     `## 중요도 기준\n` +
     `- '높음': 반드시 포함하고 강조하세요.\n` +
     `- '보통': 자연스럽게 포함하세요.\n` +

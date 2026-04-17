@@ -1125,6 +1125,97 @@ const EditableText: React.FC<EditableTextProps> = ({ value, onSave, saving, styl
   );
 };
 
+// ── Importance Picker (shared) ──
+
+const IMPORTANCE_STYLES: Record<string, { bg: string; fg: string; label: string }> = {
+  '높음': { bg: '#FEE2E2', fg: '#991B1B', label: '높음' },
+  '보통': { bg: '#E0E7FF', fg: '#3730A3', label: '보통' },
+  '낮음': { bg: '#E5E7EB', fg: '#374151', label: '낮음' },
+};
+
+interface ImportancePickerProps {
+  value: 'high' | 'normal' | 'low' | string;
+  onChange: (next: '높음' | '보통' | '낮음') => void;
+}
+
+const ImportancePicker: React.FC<ImportancePickerProps> = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const style = IMPORTANCE_STYLES[value] ?? IMPORTANCE_STYLES['보통'];
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen((p) => !p); }}
+        title="중요도 변경"
+        style={{
+          fontSize: '11px',
+          fontWeight: 600,
+          padding: '1px 8px',
+          borderRadius: '4px',
+          background: style.bg,
+          color: style.fg,
+          border: 'none',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        중요도: {style.label} ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: 0,
+            background: '#ffffff',
+            border: '1px solid #000000',
+            borderRadius: '6px',
+            padding: '4px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            zIndex: 50,
+            minWidth: '100px',
+          }}
+        >
+          {(['높음', '보통', '낮음'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onChange(v); setOpen(false); }}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left' as const,
+                padding: '6px 10px',
+                border: 'none',
+                background: value === v ? 'rgba(0,0,0,0.05)' : 'transparent',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontFamily: 'inherit',
+                color: IMPORTANCE_STYLES[v].fg,
+                fontWeight: value === v ? 700 : 500,
+                borderRadius: '4px',
+              }}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Inbox Item ──
 
 interface InboxItemComponentProps {
@@ -1132,9 +1223,10 @@ interface InboxItemComponentProps {
   onAssign: (id: number) => void;
   onDelete: (id: number) => void;
   onUpdateText: (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => Promise<void>;
+  onImportanceChange: (id: number, importance: '높음' | '보통' | '낮음') => void;
 }
 
-const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssign, onDelete, onUpdateText }) => {
+const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssign, onDelete, onUpdateText, onImportanceChange }) => {
   const [assignHover, setAssignHover] = useState(false);
   const [reconverting, setReconverting] = useState(false);
   const cleaned = record.raw_input.replace(/@\S+/g, '').replace(/\/\S+/g, '').trim();
@@ -1184,6 +1276,10 @@ const InboxItemComponent: React.FC<InboxItemComponentProps> = ({ record, onAssig
       <div style={customStyles.itemMeta}>
         <span>{formatTime(record.created_at)}</span>
         <span style={customStyles.badgeSource}>{record.source}</span>
+        <ImportancePicker
+          value={record.importance}
+          onChange={(v) => onImportanceChange(record.id, v)}
+        />
         {record.is_edited && (
           <span style={{ fontSize: '11px', color: '#6B7280', background: '#F3F4F6', padding: '1px 6px', borderRadius: '4px' }}>
             수정됨
@@ -1238,9 +1334,11 @@ interface RecordItemComponentProps {
   groups: Group[];
   onDelete: (id: number) => void;
   onUpdateText: (id: number, raw_input: string, generated_sentence: string, is_edited: boolean) => Promise<void>;
+  onImportanceChange: (id: number, importance: '높음' | '보통' | '낮음') => void;
+  onReassign: (id: number) => void;
 }
 
-const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students, groups, onDelete, onUpdateText }) => {
+const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, students, groups, onDelete, onUpdateText, onImportanceChange, onReassign }) => {
   const studentName = record.student_name ?? students.find((s) => s.id === record.student_id)?.name ?? '미지정';
   const findGroup = (gs: Group[], id: number): string | undefined => {
     for (const g of gs) {
@@ -1300,6 +1398,10 @@ const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, stude
         <span style={customStyles.badgeSource}>{record.source}</span>
         <span style={customStyles.badgeStudent}>{studentName}</span>
         <span style={customStyles.badgeStudent}>{groupName}</span>
+        <ImportancePicker
+          value={record.importance}
+          onChange={(v) => onImportanceChange(record.id, v)}
+        />
         {record.is_edited && (
           <span style={{ fontSize: '11px', color: '#6B7280', background: '#F3F4F6', padding: '1px 6px', borderRadius: '4px' }}>
             수정됨
@@ -1329,6 +1431,20 @@ const RecordItemComponent: React.FC<RecordItemComponentProps> = ({ record, stude
           AI가 의미가 없는 문장으로 인식하고 그대로 반환했습니다
         </div>
       )}
+      <div style={customStyles.itemActions}>
+        <button
+          style={{
+            ...customStyles.btnAssign,
+            background: 'transparent',
+            color: '#555555',
+            border: '1px solid rgba(0,0,0,0.2)',
+          }}
+          onClick={() => onReassign(record.id)}
+          title="다른 학생·그룹으로 이동"
+        >
+          이동
+        </button>
+      </div>
     </div>
   );
 };
@@ -1345,6 +1461,7 @@ export function RecordView() {
     addRecord,
     assignRecord,
     updateRecordText,
+    updateImportance,
     deleteRecord,
   } = useRecordStore();
   const { students, fetchStudents } = useStudentStore();
@@ -1940,6 +2057,7 @@ export function RecordView() {
                       onAssign={(id) => setAssigningRecordId(id)}
                       onDelete={handleDeleteRecord}
                       onUpdateText={handleUpdateRecordText}
+                      onImportanceChange={(id, v) => updateImportance(id, v)}
                     />
                   ) : (
                     <RecordItemComponent
@@ -1949,6 +2067,8 @@ export function RecordView() {
                       groups={groupTree}
                       onDelete={handleDeleteRecord}
                       onUpdateText={handleUpdateRecordText}
+                      onImportanceChange={(id, v) => updateImportance(id, v)}
+                      onReassign={(id) => setAssigningRecordId(id)}
                     />
                   ),
                 )}

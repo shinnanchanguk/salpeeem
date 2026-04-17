@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useStudentStore } from '@/stores/useStudentStore';
 import { useGroupStore } from '@/stores/useGroupStore';
 import { useCompletionStore } from '@/stores/useCompletionStore';
-import { getRecordCountByStudentAndGroup } from '@/lib/database';
+import { getRecordCountByStudentAndGroupRecursive } from '@/lib/database';
 import type { Student } from '@/types';
+import { getByteLength } from '@/types';
 
 interface CompletionViewProps {
   onStudentClick?: (studentName: string, areaName: string) => void;
@@ -610,7 +611,10 @@ export function CompletionView({ onStudentClick }: CompletionViewProps) {
   const [searchText, setSearchText] = useState('');
   const [activeView, setActiveView] = useState<'area' | 'student'>('area');
   const [targetBytes, setTargetBytes] = useState<number | string>(1500);
+  const [tone, setTone] = useState<'objective' | 'growth' | 'specific'>('objective');
   const [btnHovered, setBtnHovered] = useState(false);
+  const [exportHovered, setExportHovered] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Tree expand state
   const [expandedGrades, setExpandedGrades] = useState<Set<string>>(new Set());
@@ -677,7 +681,7 @@ export function CompletionView({ onStudentClick }: CompletionViewProps) {
         for (const cid of selectedGroupIds) {
           const key = `${sid}-${cid}`;
           promises.push(
-            getRecordCountByStudentAndGroup(sid, cid).then((count) => {
+            getRecordCountByStudentAndGroupRecursive(sid, cid).then((count) => {
               if (!cancelled) newCounts.set(key, count);
             })
           );
@@ -865,13 +869,58 @@ export function CompletionView({ onStudentClick }: CompletionViewProps) {
     if (pairs.length === 0) return;
 
     setBatchProgress({ total: pairs.length, done: 0, running: true });
+    const parsedTarget = Number(targetBytes);
+    const effectiveTarget = Number.isFinite(parsedTarget) && parsedTarget > 0 ? parsedTarget : undefined;
     let done = 0;
     for (const pair of pairs) {
-      await generateDraft(pair.studentId, pair.groupId);
+      await generateDraft(pair.studentId, pair.groupId, effectiveTarget, tone);
       done++;
       setBatchProgress({ total: pairs.length, done, running: done < pairs.length });
     }
     setBatchProgress({ total: pairs.length, done: pairs.length, running: false });
+  }
+
+  // Export completed drafts as TSV
+  async function handleExportDrafts() {
+    if (completedRecords.length === 0) {
+      alert('내보낼 완성된 생기부가 없습니다.');
+      return;
+    }
+    setExporting(true);
+    try {
+      const rows = [['학생', '학년', '반', '번호', '영역', '바이트', '상태', '문장']];
+      for (const rec of completedRecords) {
+        const student = students.find((s) => s.id === rec.student_id);
+        const group = groups.find((g) => g.id === rec.group_id);
+        const cleanText = (rec.final_text ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
+        rows.push([
+          rec.student_name ?? student?.name ?? '',
+          student?.grade ?? '',
+          student?.class_name ?? '',
+          String(student?.student_no ?? ''),
+          rec.group_name ?? group?.name ?? '',
+          String(rec.byte_count ?? getByteLength(cleanText)),
+          rec.status,
+          cleanText,
+        ]);
+      }
+      const tsv = rows.map((r) => r.join('\t')).join('\n');
+      const blob = new Blob(['\uFEFF' + tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const ts = new Date().toISOString().slice(0, 10);
+      link.href = url;
+      link.download = `salpeem-completed-${ts}.tsv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export drafts:', err);
+      alert('내보내기 실패: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setExporting(false);
+    }
   }
 
   // Selected lists for main view
@@ -1048,6 +1097,44 @@ export function CompletionView({ onStudentClick }: CompletionViewProps) {
               />
               <span style={customStyles.byteHint}>이내로 생성</span>
             </div>
+            <div style={customStyles.targetBytes}>
+              문체
+              <select
+                value={tone}
+                onChange={(e) => setTone(e.target.value as typeof tone)}
+                style={{
+                  ...customStyles.targetInput,
+                  width: 'auto',
+                  paddingRight: '24px',
+                  appearance: 'auto',
+                }}
+              >
+                <option value="objective">사실</option>
+                <option value="growth">성장</option>
+                <option value="specific">상세</option>
+              </select>
+            </div>
+            <button
+              style={{
+                background: exportHovered ? '#EAEAE6' : '#ffffff',
+                border: '1px solid #000000',
+                borderRadius: '6px',
+                padding: '8px 14px',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#111111',
+                cursor: exporting ? 'wait' : 'pointer',
+                fontFamily: 'inherit',
+                opacity: exporting ? 0.7 : 1,
+              }}
+              onMouseEnter={() => setExportHovered(true)}
+              onMouseLeave={() => setExportHovered(false)}
+              onClick={handleExportDrafts}
+              disabled={exporting}
+              title="완성된 생기부를 엑셀에서 열 수 있는 TSV로 내보냅니다"
+            >
+              {exporting ? '내보내는 중...' : '완성본 내보내기'}
+            </button>
             <button
               style={{
                 ...customStyles.btnPrimary,

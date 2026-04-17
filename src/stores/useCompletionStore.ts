@@ -17,7 +17,12 @@ interface CompletionStore {
   loading: boolean;
   generatingIds: Set<string>;
   fetchCompletedRecords: () => Promise<void>;
-  generateDraft: (student_id: number, group_id: number) => Promise<void>;
+  generateDraft: (
+    student_id: number,
+    group_id: number,
+    targetBytes?: number,
+    tone?: 'objective' | 'growth' | 'specific',
+  ) => Promise<void>;
   confirmRecord: (id: number) => Promise<void>;
   getCompletedRecord: (student_id: number, group_id: number) => Promise<CompletedRecord | null>;
 }
@@ -43,7 +48,7 @@ export const useCompletionStore = create<CompletionStore>((set, get) => ({
     }
   },
 
-  generateDraft: async (student_id, group_id) => {
+  generateDraft: async (student_id, group_id, targetBytes, tone) => {
     const key = makeKey(student_id, group_id);
     set((state) => ({
       generatingIds: new Set(state.generatingIds).add(key),
@@ -55,18 +60,30 @@ export const useCompletionStore = create<CompletionStore>((set, get) => ({
       const group = groups.find((g) => g.id === group_id);
       if (!student || !group) throw new Error('Student or group not found');
 
-      const records = await getRecordsByFilter([student_id], [group_id]);
+      // Parent group draft should include records from descendant groups
+      const descendantIds: number[] = [];
+      const collect = (parentId: number) => {
+        descendantIds.push(parentId);
+        for (const child of groups.filter((g) => g.parent_id === parentId)) {
+          collect(child.id);
+        }
+      };
+      collect(group_id);
+
+      const records = await getRecordsByFilter([student_id], descendantIds);
       const sentences = records.map((r) => ({
         content: r.generated_sentence,
         importance: r.importance,
         source: r.source,
       }));
 
+      const limit = targetBytes && targetBytes > 0 ? targetBytes : group.byte_limit;
       const draft = await generateAreaDraft(
         student.name,
         group.name,
         sentences,
-        group.byte_limit
+        limit,
+        tone
       );
       const byteCount = getByteLength(draft);
       await upsertCompletedRecord(student_id, group_id, draft, byteCount, '미완성');
