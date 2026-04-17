@@ -696,7 +696,7 @@ export function AssignmentView() {
   // ── Stores ───────────────────────────────────────────────────────
   const { groups, fetchGroups } = useGroupStore();
   const { students, fetchStudents } = useStudentStore();
-  const { addRecord } = useRecordStore();
+  const { addRecord, deleteRecord } = useRecordStore();
   const { settings } = useSettingsStore();
 
   // ── Folder state ────────────────────────────────────────────────
@@ -724,6 +724,7 @@ export function AssignmentView() {
 
   // ── Generation state ─────────────────────────────────────────────
   const [generating, setGenerating] = useState<boolean>(false);
+  const [genProgress, setGenProgress] = useState<{ done: number; total: number; phase: string } | null>(null);
   const [results, setResults] = useState<ResultItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -910,6 +911,7 @@ export function AssignmentView() {
     setGenerating(true);
     setError(null);
     setResults([]);
+    setGenProgress({ done: 0, total: uploadedFiles.length, phase: '파일 읽는 중' });
 
     try {
       // Save instructions to folder
@@ -920,27 +922,30 @@ export function AssignmentView() {
         taskDescription,
       );
 
-      // Extract text from files (supports XLSX, PDF, DOCX, images, etc.)
-      const fileData = await Promise.all(
-        uploadedFiles.map(async (file) => {
-          const studentName = extractNameFromFilename(file.name);
-          let content = '';
-          try {
-            const result = await extractText(file);
-            if (!result.success) {
-              content = result.error ?? `(${file.name} 파일 처리 실패)`;
-            } else if (result.needsVision && result.images && result.images.length > 0) {
-              // Use Vision API for scanned PDFs and images
-              content = await extractTextFromImages(result.images);
-            } else {
-              content = result.text;
-            }
-          } catch {
-            content = `(${file.name} 파일 내용 추출 실패)`;
+      // Extract text from files sequentially so the progress counter is meaningful
+      const fileData: Array<{ studentName: string; content: string }> = [];
+      for (let i = 0; i < uploadedFiles.length; i++) {
+        const file = uploadedFiles[i];
+        const studentName = extractNameFromFilename(file.name);
+        let content = '';
+        try {
+          const result = await extractText(file);
+          if (!result.success) {
+            content = result.error ?? `(${file.name} 파일 처리 실패)`;
+          } else if (result.needsVision && result.images && result.images.length > 0) {
+            setGenProgress({ done: i, total: uploadedFiles.length, phase: `이미지 텍스트 추출 중 (${i + 1}/${uploadedFiles.length})` });
+            content = await extractTextFromImages(result.images);
+          } else {
+            content = result.text;
           }
-          return { studentName, content };
-        }),
-      );
+        } catch {
+          content = `(${file.name} 파일 내용 추출 실패)`;
+        }
+        fileData.push({ studentName, content });
+        setGenProgress({ done: i + 1, total: uploadedFiles.length, phase: '파일 읽는 중' });
+      }
+
+      setGenProgress({ done: uploadedFiles.length, total: uploadedFiles.length, phase: 'AI 문장 생성 중' });
 
       let generated: Array<{ studentName: string; sentence: string }>;
 
@@ -982,7 +987,7 @@ export function AssignmentView() {
       const title = `${selectedFolder.name}: ${taskDescription.slice(0, 40)}`;
       const catId = selectedGroupId ? Number(selectedGroupId) : 0;
       if (isSurveyMode) {
-        await addSurvey(title, taskDescription);
+        await addSurvey(title, taskDescription, catId || null);
       } else {
         await addAssignment(title, catId, taskDescription);
       }
@@ -993,6 +998,7 @@ export function AssignmentView() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setGenerating(false);
+      setGenProgress(null);
     }
   };
 
@@ -1019,12 +1025,29 @@ export function AssignmentView() {
     );
   };
 
+  const findDuplicateId = (studentId: number | null): number | null => {
+    if (studentId === null) return null;
+    const existing = folderRecords.find(
+      (r) => r.student_id === studentId && r.assignment_folder_id === (selectedFolder?.id ?? null),
+    );
+    return existing?.id ?? null;
+  };
+
   const confirmSingle = async (index: number) => {
     const item = results[index];
     if (item.confirmed) return;
 
     const source: RecordSource = isSurveyMode ? '설문' : '과제';
     const catId = item.groupId ?? (selectedGroupId ? Number(selectedGroupId) : null);
+
+    const dupId = findDuplicateId(item.studentId);
+    if (dupId !== null) {
+      const ok = window.confirm(
+        `${item.studentName ?? '이 학생'}에게 이미 이 폴더의 문장이 있습니다. 덮어쓸까요?`,
+      );
+      if (!ok) return;
+      await deleteRecord(dupId);
+    }
 
     await addRecord(
       taskDescription,
@@ -1037,6 +1060,10 @@ export function AssignmentView() {
     );
 
     setResults((prev) => prev.map((r, i) => (i === index ? { ...r, confirmed: true } : r)));
+    if (selectedFolder) {
+      const refreshed = await getRecordsByAssignmentFolder(selectedFolder.id);
+      setFolderRecords(refreshed);
+    }
   };
 
   const confirmAll = async () => {
@@ -1045,6 +1072,22 @@ export function AssignmentView() {
     const unconfirmed = results
       .map((r, i) => ({ ...r, index: i }))
       .filter((r) => !r.confirmed);
+
+    // Count existing duplicates once, ask user once.
+    const dups = unconfirmed
+      .map((i) => ({ id: findDuplicateId(i.studentId), name: i.studentName }))
+      .filter((d) => d.id !== null);
+    if (dups.length > 0) {
+      const names = dups.map((d) => d.name).filter(Boolean).slice(0, 5).join(', ');
+      const suffix = dups.length > 5 ? ` 외 ${dups.length - 5}명` : '';
+      const ok = window.confirm(
+        `${dups.length}명의 기존 문장이 있습니다 (${names}${suffix}). 모두 덮어쓸까요? 취소하면 기존 문장은 유지하고 새로 만든 문장은 저장하지 않습니다.`,
+      );
+      if (!ok) return;
+      for (const d of dups) {
+        if (d.id !== null) await deleteRecord(d.id);
+      }
+    }
 
     for (const item of unconfirmed) {
       const catId = item.groupId ?? (selectedGroupId ? Number(selectedGroupId) : null);
@@ -1060,6 +1103,10 @@ export function AssignmentView() {
     }
 
     setResults((prev) => prev.map((r) => ({ ...r, confirmed: true })));
+    if (selectedFolder) {
+      const refreshed = await getRecordsByAssignmentFolder(selectedFolder.id);
+      setFolderRecords(refreshed);
+    }
   };
 
   // ── Reset form ───────────────────────────────────────────────────
@@ -1669,7 +1716,11 @@ export function AssignmentView() {
                   if (!generating) e.currentTarget.style.backgroundColor = '#111111';
                 }}
               >
-                {generating ? '생성 중...' : '문장 생성하기'}
+                {generating
+                  ? genProgress
+                    ? `${genProgress.phase} (${genProgress.done}/${genProgress.total})`
+                    : '생성 중...'
+                  : '문장 생성하기'}
               </button>
               <button
                 style={{
